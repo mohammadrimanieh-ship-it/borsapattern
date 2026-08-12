@@ -4,6 +4,11 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val releaseStorePath = System.getenv("BORSAPATTERN_KEYSTORE_PATH")
+val releaseStorePassword = System.getenv("BORSAPATTERN_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("BORSAPATTERN_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("BORSAPATTERN_KEY_PASSWORD")
+
 android {
     namespace = "com.borsapattern.app"
     compileSdk = 36
@@ -12,8 +17,28 @@ android {
         applicationId = "com.borsapattern.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.6"
+        versionCode = 8
+        versionName = "0.8"
+    }
+
+    signingConfigs {
+        create("borsaRelease") {
+            if (!releaseStorePath.isNullOrBlank()) {
+                storeFile = file(releaseStorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            if (!releaseStorePath.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("borsaRelease")
+            }
+            isMinifyEnabled = false
+        }
     }
 
     buildFeatures {

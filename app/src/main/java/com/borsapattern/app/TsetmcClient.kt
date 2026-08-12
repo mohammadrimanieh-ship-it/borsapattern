@@ -32,6 +32,10 @@ class TsetmcClient {
         return get(u)
     }
 
+
+    fun instrumentsHistoryInDayRaw(date: Int): String =
+        get("https://cdn.tsetmc.com/api/ClosingPrice/GetInstrmentsHistoryInDay/$date")
+
     fun dailyRaw(insCode: String): String =
         get("https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceDailyList/$insCode/0")
 

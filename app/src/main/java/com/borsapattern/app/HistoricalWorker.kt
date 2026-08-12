@@ -35,13 +35,17 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     fresh += SymbolEntity(
                         insCode=ins,
                         symbol=cleanSymbol(rawSymbol,ins),
-                        name=rawName?.trim()
+                        name=rawName?.trim(),
+                        flow=firstInt(o,"flow"),
+                        segment=MarketPrefs.classify(firstInt(o,"flow"),firstString(o,"cgrValCotTitle","boardTitle")),
+                        boardTitle=firstString(o,"cgrValCotTitle","boardTitle")
                     )
                 }
                 if(fresh.isNotEmpty()) dao.upsertSymbols(fresh)
             }
 
-            val symbols=dao.allSymbols()
+            val wanted=MarketPrefs.selected(applicationContext)
+            val symbols=dao.allSymbols().filter{ wanted.contains(it.segment) }
             if(symbols.isEmpty()){
                 prefs.edit()
                     .putString("sync_status","فهرست نمادها دریافت نشد؛ بعداً دوباره تلاش می‌شود")
