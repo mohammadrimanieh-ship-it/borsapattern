@@ -33,6 +33,9 @@ class TsetmcClient {
     }
 
 
+    fun instrumentInfoRaw(insCode: String): String =
+        get("https://cdn.tsetmc.com/api/Instrument/GetInstrumentInfo/$insCode")
+
     fun instrumentsHistoryInDayRaw(date: Int): String =
         get("https://cdn.tsetmc.com/api/ClosingPrice/GetInstrmentsHistoryInDay/$date")
 
@@ -41,6 +44,17 @@ class TsetmcClient {
 
     fun bestLimitsRaw(insCode: String, date: Int): String =
         get("https://cdn.tsetmc.com/api/BestLimits/$insCode/$date")
+
+    fun jsonObjectFrom(raw:String,vararg keys:String):JSONObject? {
+        val t=raw.trim()
+        if(!t.startsWith("{")) return null
+        val root=JSONObject(t)
+        for(k in keys){
+            val v=root.opt(k)
+            if(v is JSONObject) return v
+        }
+        return root
+    }
 
     fun jsonArrayFrom(raw: String, vararg keys: String): JSONArray {
         val t = raw.trim()

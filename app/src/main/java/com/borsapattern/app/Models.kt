@@ -26,8 +26,16 @@ data class QueueEventEntity(
 
 @Entity(tableName="live_scores")
 data class LiveScoreEntity(
-    @PrimaryKey val insCode:String,val symbol:String?,val score:Double,
-    val reason:String,val updatedAt:Long
+    @PrimaryKey val insCode:String,
+    val symbol:String?,
+    val score:Double,
+    val reason:String,
+    val updatedAt:Long,
+    val patternScore:Double=0.0,
+    val technicalScore:Double=0.0,
+    val volumeScore:Double=0.0,
+    val rsi:Double?=null,
+    val macd:Double?=null
 )
 
 data class QueueHistoryRow(
@@ -58,9 +66,21 @@ interface BorsaDao {
     suspend fun symbolByCode(insCode:String):SymbolEntity?
 
     @Query("""
+      SELECT * FROM symbols
+      WHERE symbol IS NULL OR symbol='' OR symbol=insCode OR symbol GLOB '[0-9]*'
+      ORDER BY insCode LIMIT :limit OFFSET :offset
+    """)
+    suspend fun unknownSymbols(limit:Int,offset:Int=0):List<SymbolEntity>
+
+    @Query("SELECT * FROM daily WHERE insCode=:insCode ORDER BY date DESC LIMIT :limit")
+    suspend fun recentDaily(insCode:String,limit:Int=220):List<DailyEntity>
+
+    @Query("""
       SELECT l.insCode AS insCode,
-             COALESCE(NULLIF(s.symbol,''),NULLIF(s.name,''),NULLIF(l.symbol,'')) AS symbol,
-             l.score AS score,l.reason AS reason,l.updatedAt AS updatedAt
+             COALESCE(NULLIF(s.symbol,''),NULLIF(s.name,''),NULLIF(l.symbol,''),'نماد نامشخص') AS symbol,
+             l.score AS score,l.reason AS reason,l.updatedAt AS updatedAt,
+             l.patternScore AS patternScore,l.technicalScore AS technicalScore,
+             l.volumeScore AS volumeScore,l.rsi AS rsi,l.macd AS macd
       FROM live_scores l
       LEFT JOIN symbols s ON s.insCode=l.insCode
       WHERE s.segment IN (:segments)
@@ -97,6 +117,6 @@ interface BorsaDao {
 
 @Database(
     entities=[SymbolEntity::class,DailyEntity::class,QueueEventEntity::class,LiveScoreEntity::class],
-    version=2,exportSchema=false
+    version=3,exportSchema=false
 )
 abstract class AppDatabase:RoomDatabase(){ abstract fun dao():BorsaDao }

@@ -55,7 +55,7 @@ jobs:
         if: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: BorsaPattern-v08-release-apk
+          name: BorsaPattern-v09-release-apk
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
@@ -63,6 +63,6 @@ jobs:
         if: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 == '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: BorsaPattern-v08-debug-apk
+          name: BorsaPattern-v09-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

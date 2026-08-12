@@ -13,7 +13,7 @@ class BorsaApp:Application(){
     override fun onCreate(){
         super.onCreate()
         db=Room.databaseBuilder(this,AppDatabase::class.java,"borsa.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2,MIGRATION_2_3)
             .build()
         Notifications.createChannel(this)
         scheduleBackgroundWork()
@@ -21,35 +21,24 @@ class BorsaApp:Application(){
 
     private fun scheduleBackgroundWork(){
         val net=HistoricalWorker.networkConstraint()
+
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "daily_incremental_sync_kickoff",
-            ExistingPeriodicWorkPolicy.UPDATE,
-            PeriodicWorkRequestBuilder<SyncKickoffWorker>(12,TimeUnit.HOURS)
-                .setConstraints(net).build()
+            "daily_incremental_sync_kickoff",ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<SyncKickoffWorker>(12,TimeUnit.HOURS).setConstraints(net).build()
         )
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "historical_queue_analysis",
-            ExistingPeriodicWorkPolicy.UPDATE,
-            PeriodicWorkRequestBuilder<QueueAnalysisWorker>(1,TimeUnit.HOURS)
-                .setConstraints(net).build()
+            "historical_queue_analysis",ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<QueueAnalysisWorker>(1,TimeUnit.HOURS).setConstraints(net).build()
         )
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "live_monitor",
-            ExistingPeriodicWorkPolicy.UPDATE,
-            PeriodicWorkRequestBuilder<LiveWorker>(15,TimeUnit.MINUTES)
-                .setConstraints(net).build()
-        )
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "metadata_refresh",
-            ExistingPeriodicWorkPolicy.UPDATE,
-            PeriodicWorkRequestBuilder<MetadataWorker>(12,TimeUnit.HOURS)
-                .setConstraints(net).build()
+            "live_monitor",ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<LiveWorker>(15,TimeUnit.MINUTES).setConstraints(net).build()
         )
 
         WorkManager.getInstance(this).enqueueUniqueWork(
-            "metadata_refresh_now",
-            ExistingWorkPolicy.KEEP,
-            OneTimeWorkRequestBuilder<MetadataWorker>().setConstraints(net).build()
+            MetadataWorker.CHAIN,ExistingWorkPolicy.KEEP,
+            OneTimeWorkRequestBuilder<MetadataWorker>()
+                .setConstraints(net).setInputData(workDataOf("batch" to 35)).build()
         )
     }
 
@@ -59,6 +48,15 @@ class BorsaApp:Application(){
                 db.execSQL("ALTER TABLE symbols ADD COLUMN flow INTEGER")
                 db.execSQL("ALTER TABLE symbols ADD COLUMN segment TEXT NOT NULL DEFAULT 'OTHER'")
                 db.execSQL("ALTER TABLE symbols ADD COLUMN boardTitle TEXT")
+            }
+        }
+        val MIGRATION_2_3=object:Migration(2,3){
+            override fun migrate(db:SupportSQLiteDatabase){
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN patternScore REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN technicalScore REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN volumeScore REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN rsi REAL")
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN macd REAL")
             }
         }
     }
