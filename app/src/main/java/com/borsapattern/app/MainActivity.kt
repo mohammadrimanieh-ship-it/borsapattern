@@ -34,7 +34,7 @@ class MainActivity:ComponentActivity(){
     }
 
     @Composable
-    private fun BorsaTheme(content:@Composable()->Unit){
+    private fun BorsaTheme(content: @Composable () -> Unit){
         val scheme=lightColorScheme(
             primary=Color(0xFF6546B8),
             secondary=Color(0xFF8B6BD8),
