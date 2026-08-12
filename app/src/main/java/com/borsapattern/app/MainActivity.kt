@@ -33,7 +33,7 @@ class MainActivity:ComponentActivity(){
     }
 
     @Composable
-    private fun BorsaTheme(content:@Composable()->Unit){
+    private fun BorsaTheme(content: @Composable () -> Unit){
         MaterialTheme(
             colorScheme=lightColorScheme(
                 primary=Color(0xFF6546B8),
