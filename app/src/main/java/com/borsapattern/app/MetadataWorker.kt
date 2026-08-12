@@ -11,54 +11,57 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     private val prefs get()=applicationContext.getSharedPreferences("metadata",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
-        val batch=inputData.getInt("batch",35)
-        val unknown=dao.unknownSymbols(batch,0)
+        val batch=inputData.getInt("batch",30)
+        val symbols=dao.unknownSymbols(batch)
+        val live=dao.liveScoresNeedingName(batch)
 
-        if(unknown.isEmpty()){
-            prefs.edit().putString("status","نام نمادها کامل شد").putBoolean("running",false).apply()
+        if(symbols.isEmpty() && live.isEmpty()){
+            dao.repairLiveScoreNames()
+            prefs.edit()
+                .putString("status","نام نمادها کامل شد")
+                .putBoolean("running",false)
+                .apply()
             return Result.success()
         }
 
-        prefs.edit().putBoolean("running",true)
-            .putString("status","در حال تکمیل نام ${unknown.size} نماد").apply()
+        prefs.edit()
+            .putBoolean("running",true)
+            .putString("status","در حال ترمیم نام نمادها")
+            .apply()
+
+        val codes=LinkedHashSet<String>()
+        symbols.forEach{codes+=it.insCode}
+        live.forEach{codes+=it.insCode}
 
         var fixed=0
-        for(s in unknown){
+        for(code in codes.take(batch)){
             try{
-                val raw=api.instrumentInfoRaw(s.insCode)
-                val o=api.jsonObjectFrom(raw,"instrumentInfo","instrument") ?: continue
-                val symbol=cleanSymbol(firstString(o,"lVal18AFC","symbol","instrumentName"),s.insCode)
-                val name=firstString(o,"lVal30","name","companyName","companyNamePersian")
-                val flow=firstInt(o,"flow") ?: s.flow
-                val board=firstString(o,"cgrValCotTitle","boardTitle","marketTitle") ?: s.boardTitle
-                if(symbol!=null || !name.isNullOrBlank()){
-                    dao.upsertSymbols(listOf(s.copy(
-                        symbol=symbol ?: s.symbol,
-                        name=name ?: s.name,
-                        flow=flow,
-                        segment=MarketPrefs.classify(flow,board),
-                        boardTitle=board
-                    )))
-                    fixed++
-                }
+                val current=dao.symbolByCode(code)
+                val entity=SymbolResolver.ensure(
+                    dao=dao,api=api,insCode=code,
+                    rawSymbol=current?.symbol,rawName=current?.name,
+                    flow=current?.flow,board=current?.boardTitle
+                )
+                if(!entity.symbol.isNullOrBlank() || !entity.name.isNullOrBlank()) fixed++
             }catch(_:Exception){}
-            delay(80)
+            delay(90)
         }
 
-        val remaining=dao.unknownSymbols(1,0).isNotEmpty()
+        dao.repairLiveScoreNames()
+
         prefs.edit()
-            .putString("status","نام نمادها: $fixed مورد این مرحله اصلاح شد")
-            .putBoolean("running",remaining).apply()
+            .putString("status","این مرحله $fixed نام اصلاح شد؛ ادامه در پس‌زمینه")
+            .putBoolean("running",true)
+            .apply()
 
-        if(remaining){
-            val next=OneTimeWorkRequestBuilder<MetadataWorker>()
-                .setConstraints(HistoricalWorker.networkConstraint())
-                .setInputData(workDataOf("batch" to batch))
-                .setInitialDelay(3,TimeUnit.SECONDS).build()
-            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-                CHAIN,ExistingWorkPolicy.APPEND_OR_REPLACE,next
-            )
-        }
+        val next=OneTimeWorkRequestBuilder<MetadataWorker>()
+            .setConstraints(HistoricalWorker.networkConstraint())
+            .setInputData(workDataOf("batch" to batch))
+            .setInitialDelay(3,TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            CHAIN,ExistingWorkPolicy.APPEND_OR_REPLACE,next
+        )
         return Result.success()
     }
 

@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.work.*
 import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity:ComponentActivity(){
@@ -29,32 +30,33 @@ class MainActivity:ComponentActivity(){
         super.onCreate(savedInstanceState)
         if(android.os.Build.VERSION.SDK_INT>=33)
             notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
-        setContent{ BorsaTheme{ AppUi() } }
+        setContent { AppTheme { AppUi() } }
     }
 
     @Composable
-    private fun BorsaTheme(content: @Composable () -> Unit){
+    private fun AppTheme(content: @Composable () -> Unit){
         MaterialTheme(
             colorScheme=lightColorScheme(
-                primary=Color(0xFF6546B8),
-                secondary=Color(0xFF8B6BD8),
-                surface=Color(0xFFFFF9FF),
-                background=Color(0xFFFFF9FF),
-                primaryContainer=Color(0xFFE9DEFF)
+                primary=Color(0xFF5B3FB2),
+                secondary=Color(0xFF8B6BDD),
+                background=Color(0xFFF8F4FF),
+                surface=Color.White,
+                primaryContainer=Color(0xFFE9E0FF),
+                secondaryContainer=Color(0xFFF0EAFF)
             ),
             content=content
         )
     }
 
     @Composable
-    fun AppUi(){
+    private fun AppUi(){
         val app=application as BorsaApp
         val syncPrefs=remember{getSharedPreferences("sync",Context.MODE_PRIVATE)}
         val analysisPrefs=remember{getSharedPreferences("analysis",Context.MODE_PRIVATE)}
         val metaPrefs=remember{getSharedPreferences("metadata",Context.MODE_PRIVATE)}
 
         var symbols by remember{mutableStateOf(0)}
-        var days by remember{mutableStateOf(0)}
+        var records by remember{mutableStateOf(0)}
         var candidates by remember{mutableStateOf(0)}
         var confirmed by remember{mutableStateOf(0)}
         var rejected by remember{mutableStateOf(0)}
@@ -62,8 +64,13 @@ class MainActivity:ComponentActivity(){
         var latest by remember{mutableStateOf<Int?>(null)}
         var scores by remember{mutableStateOf(emptyList<LiveScoreEntity>())}
         var history by remember{mutableStateOf(emptyList<QueueHistoryRow>())}
-        var tab by remember{mutableIntStateOf(0)}
+        var trades by remember{mutableStateOf(emptyList<PaperTradeEntity>())}
+
+        var section by remember{mutableIntStateOf(0)}
+        var liveEnabled by remember{mutableStateOf(false)}
+        var lastLiveScan by remember{mutableStateOf<Long?>(null)}
         var showMarkets by remember{mutableStateOf(false)}
+
         var syncStatus by remember{mutableStateOf("آماده")}
         var syncDone by remember{mutableStateOf(0)}
         var syncTotal by remember{mutableStateOf(0)}
@@ -76,7 +83,7 @@ class MainActivity:ComponentActivity(){
             while(true){
                 val segs=MarketPrefs.selected(this@MainActivity).toList()
                 symbols=app.db.dao().symbolCount()
-                days=app.db.dao().dailyCount()
+                records=app.db.dao().dailyCount()
                 candidates=app.db.dao().candidateCount()
                 confirmed=app.db.dao().confirmedCount()
                 rejected=app.db.dao().rejectedCount()
@@ -84,6 +91,8 @@ class MainActivity:ComponentActivity(){
                 latest=app.db.dao().latestMarketDate()
                 scores=app.db.dao().topScoresFor(segs)
                 history=app.db.dao().confirmedHistoryFor(segs)
+                trades=app.db.dao().recentPaperTrades(100)
+
                 syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
                 syncDone=syncPrefs.getInt("sync_done",0)
                 syncTotal=syncPrefs.getInt("sync_total",0)
@@ -95,98 +104,65 @@ class MainActivity:ComponentActivity(){
             }
         }
 
+        LaunchedEffect(liveEnabled){
+            while(liveEnabled){
+                try{
+                    LiveScanEngine.scanOnce(this@MainActivity)
+                    lastLiveScan=System.currentTimeMillis()
+                }catch(_:Exception){}
+                delay(5000)
+            }
+        }
+
         Scaffold(
             containerColor=MaterialTheme.colorScheme.background,
             topBar={
-                Surface(shadowElevation=3.dp){
-                    Column(Modifier.fillMaxWidth().padding(18.dp,14.dp)){
+                Surface(shadowElevation=4.dp){
+                    Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=12.dp)){
                         Text("Borsa Pattern",fontSize=30.sp,fontWeight=FontWeight.Black)
-                        Text("الگو + تکنیکال + حجم",color=MaterialTheme.colorScheme.primary)
+                        Text(
+                            "رصد بازار • الگو • تکنیکال • Paper Trading",
+                            color=MaterialTheme.colorScheme.primary,
+                            fontSize=13.sp
+                        )
                     }
                 }
             }
-        ){pad->
-            LazyColumn(
-                Modifier.fillMaxSize().padding(pad).padding(horizontal=14.dp),
-                verticalArrangement=Arrangement.spacedBy(10.dp)
+        ){padding->
+            Column(
+                Modifier.fillMaxSize().padding(padding).padding(horizontal=12.dp)
             ){
-                item{
-                    Spacer(Modifier.height(4.dp))
-                    DashboardCard(days,symbols,candidates,confirmed,rejected,errors,latest)
+                ScrollableTabRow(
+                    selectedTabIndex=section,
+                    edgePadding=0.dp,
+                    containerColor=Color.Transparent
+                ){
+                    Tab(section==0,{section=0},text={Text("داشبورد")})
+                    Tab(section==1,{section=1},text={Text("فرصت‌ها")})
+                    Tab(section==2,{section=2},text={Text("تاریخچه")})
+                    Tab(section==3,{section=3},text={Text("آزمایشی")})
+                    Tab(section==4,{section=4},text={Text("تنظیمات")})
                 }
 
-                item{
-                    ProcessCard(
-                        title="دریافت تاریخچه",
-                        status=syncStatus,
-                        done=syncDone,total=syncTotal
+                when(section){
+                    0 -> Dashboard(
+                        records,symbols,candidates,confirmed,rejected,errors,latest,
+                        syncStatus,syncDone,syncTotal,
+                        analysisStatus,analysisDone,analysisTotal,
+                        metadataStatus,liveEnabled,lastLiveScan,
+                        onLiveToggle={liveEnabled=it},
+                        onUpdate={startUpdate()},
+                        onAnalyze={startAnalyze()}
+                    )
+                    1 -> Opportunities(scores)
+                    2 -> QueueHistory(history)
+                    3 -> PaperTrades(trades)
+                    else -> SettingsPage(
+                        onMarkets={showMarkets=true},
+                        onNames={startNameRepair()},
+                        onUpdate={startUpdate()}
                     )
                 }
-                item{
-                    ProcessCard(
-                        title="تحلیل الگو",
-                        status=analysisStatus,
-                        done=analysisDone,total=analysisTotal
-                    )
-                }
-                item{
-                    Card(shape=RoundedCornerShape(18.dp)){
-                        Column(Modifier.padding(14.dp)){
-                            Text("نام نمادها",fontWeight=FontWeight.Bold)
-                            Text(metadataStatus)
-                        }
-                    }
-                }
-
-                item{
-                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        FilledTonalButton(onClick={showMarkets=true},modifier=Modifier.weight(1f)){
-                            Text("انتخاب بازارها")
-                        }
-                        Button(
-                            onClick={
-                                HistoricalWorker.start(this@MainActivity,false)
-                                WorkManager.getInstance(this@MainActivity).enqueueUniqueWork(
-                                    MetadataWorker.CHAIN,ExistingWorkPolicy.REPLACE,
-                                    OneTimeWorkRequestBuilder<MetadataWorker>()
-                                        .setConstraints(HistoricalWorker.networkConstraint())
-                                        .setInputData(workDataOf("batch" to 35)).build()
-                                )
-                            },modifier=Modifier.weight(1f)
-                        ){Text("به‌روزرسانی")}
-                    }
-                }
-
-                item{
-                    Button(
-                        onClick={
-                            val req=OneTimeWorkRequestBuilder<QueueAnalysisWorker>()
-                                .setConstraints(HistoricalWorker.networkConstraint())
-                                .setInputData(workDataOf("batchSize" to 240,"parallelism" to 4))
-                                .build()
-                            WorkManager.getInstance(this@MainActivity).enqueueUniqueWork(
-                                QueueAnalysisWorker.ANALYSIS_CHAIN,ExistingWorkPolicy.REPLACE,req
-                            )
-                        },
-                        modifier=Modifier.fillMaxWidth()
-                    ){Text("تحلیل سریع الگو")}
-                }
-
-                item{
-                    TabRow(selectedTabIndex=tab,containerColor=Color.Transparent){
-                        Tab(tab==0,{tab=0},text={Text("فرصت‌های فعلی")})
-                        Tab(tab==1,{tab=1},text={Text("تاریخچه صف‌ها")})
-                    }
-                }
-
-                if(tab==0){
-                    if(scores.isEmpty()) item{EmptyCard("فعلاً فرصت زنده‌ای ثبت نشده")}
-                    else items(scores){s->SignalCard(s)}
-                }else{
-                    if(history.isEmpty()) item{EmptyCard("صف تأییدشده‌ای برای بازارهای انتخابی ثبت نشده")}
-                    else items(history){h->HistoryCard(h)}
-                }
-                item{Spacer(Modifier.height(30.dp))}
             }
         }
 
@@ -200,23 +176,191 @@ class MainActivity:ComponentActivity(){
     }
 
     @Composable
-    private fun DashboardCard(
-        days:Int,symbols:Int,candidates:Int,confirmed:Int,rejected:Int,errors:Int,latest:Int?
+    private fun Dashboard(
+        records:Int,symbols:Int,candidates:Int,confirmed:Int,rejected:Int,errors:Int,latest:Int?,
+        syncStatus:String,syncDone:Int,syncTotal:Int,
+        analysisStatus:String,analysisDone:Int,analysisTotal:Int,
+        metadataStatus:String,liveEnabled:Boolean,lastLiveScan:Long?,
+        onLiveToggle:(Boolean)->Unit,onUpdate:()->Unit,onAnalyze:()->Unit
     ){
-        Card(
-            shape=RoundedCornerShape(24.dp),
-            colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            verticalArrangement=Arrangement.spacedBy(10.dp),
+            contentPadding=PaddingValues(vertical=10.dp)
         ){
-            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
-                Text("داشبورد",fontWeight=FontWeight.Bold,fontSize=18.sp)
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    MiniStat("رکورد",days,Modifier.weight(1f))
-                    MiniStat("نماد",symbols,Modifier.weight(1f))
-                    MiniStat("صف",confirmed,Modifier.weight(1f))
+            item{
+                Card(
+                    shape=RoundedCornerShape(24.dp),
+                    colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)
+                ){
+                    Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                            Stat("رکورد",records,Modifier.weight(1f))
+                            Stat("نماد",symbols,Modifier.weight(1f))
+                            Stat("صف",confirmed,Modifier.weight(1f))
+                        }
+                        Text("کاندید: ${fa(candidates)}  •  ردشده: ${fa(rejected)}  •  خطا: ${fa(errors)}")
+                        Text("آخرین روز بازار: ${Jalali.fromGregorianInt(latest)}")
+                    }
                 }
-                Text("کاندید باقی‌مانده: ${fa(candidates)}   •   ردشده: ${fa(rejected)}")
-                Text("خطای دریافت: ${fa(errors)}")
-                Text("آخرین روز بازار: ${Jalali.fromGregorianInt(latest)}")
+            }
+
+            item{
+                Card(shape=RoundedCornerShape(20.dp)){
+                    Column(Modifier.padding(14.dp)){
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement=Arrangement.SpaceBetween,
+                            verticalAlignment=Alignment.CenterVertically
+                        ){
+                            Column{
+                                Text("اسکن زنده ۵ ثانیه‌ای",fontWeight=FontWeight.Bold)
+                                Text(
+                                    if(liveEnabled) "فعال — کل MarketWatch در هر چرخه بررسی می‌شود"
+                                    else "خاموش",
+                                    fontSize=12.sp
+                                )
+                            }
+                            Switch(checked=liveEnabled,onCheckedChange=onLiveToggle)
+                        }
+                        if(lastLiveScan!=null){
+                            Text("آخرین اسکن: ${clock(lastLiveScan)}",fontSize=12.sp)
+                        }
+                    }
+                }
+            }
+
+            item{ ProcessCard("دریافت تاریخچه",syncStatus,syncDone,syncTotal) }
+            item{ ProcessCard("تحلیل الگو",analysisStatus,analysisDone,analysisTotal) }
+            item{
+                Card(shape=RoundedCornerShape(18.dp)){
+                    Column(Modifier.padding(14.dp)){
+                        Text("نام نمادها",fontWeight=FontWeight.Bold)
+                        Text(metadataStatus)
+                    }
+                }
+            }
+
+            item{
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    Button(onClick=onUpdate,modifier=Modifier.weight(1f)){Text("به‌روزرسانی")}
+                    Button(onClick=onAnalyze,modifier=Modifier.weight(1f)){Text("تحلیل سریع")}
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun Opportunities(scores:List<LiveScoreEntity>){
+        if(scores.isEmpty()){
+            Empty("فعلاً فرصت زنده‌ای ثبت نشده")
+            return
+        }
+        LazyColumn(
+            verticalArrangement=Arrangement.spacedBy(10.dp),
+            contentPadding=PaddingValues(vertical=10.dp)
+        ){
+            items(scores){s->
+                Card(shape=RoundedCornerShape(22.dp)){
+                    Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                            Column{
+                                Text(s.symbol?:"در حال تکمیل نام",fontWeight=FontWeight.Black,fontSize=20.sp)
+                                Text(s.reason,fontSize=12.sp,color=Color.DarkGray)
+                            }
+                            ScoreBadge(s.score)
+                        }
+
+                        WeightedBar("الگوی صف",s.patternScore,40)
+                        WeightedBar("تکنیکال",s.technicalScore,25)
+                        WeightedBar("حجم",s.volumeScore,20)
+                        WeightedBar("شباهت رفتاری*",s.actorScore,15)
+
+                        if(s.rsi!=null){
+                            Text("RSI: ${Jalali.digits(String.format(Locale.US,"%.1f",s.rsi))}",fontSize=12.sp)
+                        }
+                        Text("* شباهت رفتاری آزمایشی است و هویت یک معامله‌گر را اثبات نمی‌کند.",fontSize=10.sp,color=Color.Gray)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun QueueHistory(items:List<QueueHistoryRow>){
+        if(items.isEmpty()){
+            Empty("هنوز صف تأییدشده‌ای برای بازارهای انتخابی ثبت نشده")
+            return
+        }
+        LazyColumn(
+            verticalArrangement=Arrangement.spacedBy(8.dp),
+            contentPadding=PaddingValues(vertical=10.dp)
+        ){
+            items(items){h->
+                Card(shape=RoundedCornerShape(18.dp)){
+                    Column(Modifier.padding(14.dp)){
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                            Text(h.symbol?:"در حال تکمیل نام",fontWeight=FontWeight.Bold,fontSize=18.sp)
+                            Text("${fa(h.score.toInt())}/۱۰۰",fontWeight=FontWeight.Black)
+                        }
+                        Text(Jalali.fromGregorianInt(h.date),color=MaterialTheme.colorScheme.primary)
+                        Text("زمان صف: ${fmtTime(h.eventTime)}  •  ارزش صف: ${fmtMoney(h.queueValue)}")
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun PaperTrades(items:List<PaperTradeEntity>){
+        if(items.isEmpty()){
+            Empty("Paper Trading هنوز معامله‌ای ثبت نکرده؛ ورود فرضی از امتیاز ۸۲ به بالا انجام می‌شود.")
+            return
+        }
+        LazyColumn(
+            verticalArrangement=Arrangement.spacedBy(8.dp),
+            contentPadding=PaddingValues(vertical=10.dp)
+        ){
+            items(items){t->
+                Card(shape=RoundedCornerShape(18.dp)){
+                    Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                            Text(t.symbol?:"نماد",fontWeight=FontWeight.Bold,fontSize=18.sp)
+                            Text(if(t.status=="OPEN") "باز" else "بسته",color=MaterialTheme.colorScheme.primary)
+                        }
+                        Text("ورود فرضی: ${faPrice(t.entryPrice)}")
+                        Text("قیمت فعلی/خروج: ${faPrice(t.currentPrice)}")
+                        Text("بازده فرضی: ${Jalali.digits(String.format(Locale.US,"%.2f%%",t.pnlPct))}")
+                        Text("امتیاز ورود: ${fa(t.entryScore.toInt())}/۱۰۰")
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SettingsPage(onMarkets:()->Unit,onNames:()->Unit,onUpdate:()->Unit){
+        LazyColumn(
+            verticalArrangement=Arrangement.spacedBy(10.dp),
+            contentPadding=PaddingValues(vertical=10.dp)
+        ){
+            item{
+                Button(onClick=onMarkets,modifier=Modifier.fillMaxWidth()){Text("انتخاب بورس / فرابورس / بازار پایه")}
+            }
+            item{
+                FilledTonalButton(onClick=onNames,modifier=Modifier.fillMaxWidth()){Text("ترمیم دوباره نام نمادها")}
+            }
+            item{
+                FilledTonalButton(onClick=onUpdate,modifier=Modifier.fillMaxWidth()){Text("همگام‌سازی داده‌های جدید")}
+            }
+            item{
+                Card(shape=RoundedCornerShape(18.dp)){
+                    Text(
+                        "اسکن ۵ثانیه‌ای فقط هنگام باز بودن برنامه اجرا می‌شود. در پس‌زمینه Android، رصد دوره‌ای با WorkManager ادامه دارد.",
+                        Modifier.padding(14.dp),
+                        fontSize=12.sp
+                    )
+                }
             }
         }
     }
@@ -226,83 +370,64 @@ class MainActivity:ComponentActivity(){
         Card(shape=RoundedCornerShape(18.dp)){
             Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
                 Text(title,fontWeight=FontWeight.Bold)
-                Text(status)
+                Text(status,fontSize=12.sp)
                 if(total>0 && done<total){
                     LinearProgressIndicator(
                         progress={done.toFloat()/total.toFloat()},
                         modifier=Modifier.fillMaxWidth()
                     )
-                    Text("${fa(done)} از ${fa(total)}")
+                    Text("${fa(done)} از ${fa(total)}",fontSize=12.sp)
                 }
             }
         }
     }
 
     @Composable
-    private fun MiniStat(title:String,value:Int,modifier:Modifier){
-        Surface(modifier,shape=RoundedCornerShape(16.dp),color=Color.White.copy(alpha=.75f)){
+    private fun Stat(title:String,value:Int,modifier:Modifier){
+        Surface(modifier,shape=RoundedCornerShape(16.dp),color=Color.White.copy(alpha=.78f)){
             Column(Modifier.padding(10.dp),horizontalAlignment=Alignment.CenterHorizontally){
-                Text(fa(value),fontWeight=FontWeight.Black,fontSize=20.sp)
-                Text(title,fontSize=12.sp)
+                Text(fa(value),fontSize=20.sp,fontWeight=FontWeight.Black)
+                Text(title,fontSize=11.sp)
             }
         }
     }
 
     @Composable
-    private fun SignalCard(s:LiveScoreEntity){
-        val total=s.score.toInt()
-        Card(shape=RoundedCornerShape(20.dp)){
-            Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                    Text(s.symbol?:"در حال تکمیل نام",fontWeight=FontWeight.Bold,fontSize=19.sp)
-                    Surface(
-                        shape=RoundedCornerShape(16.dp),
-                        color=MaterialTheme.colorScheme.primaryContainer
-                    ){
-                        Text("${fa(total)}/۱۰۰",Modifier.padding(10.dp),fontWeight=FontWeight.Black)
-                    }
-                }
-                Text(s.reason,color=Color.DarkGray)
-                ScoreBar("الگوی صف",s.patternScore)
-                ScoreBar("تکنیکال",s.technicalScore)
-                ScoreBar("حجم",s.volumeScore)
-                val rsi=s.rsi
-                if(rsi!=null) Text("RSI: ${Jalali.digits(String.format(Locale.US,"%.1f",rsi))}")
-            }
-        }
-    }
-
-    @Composable
-    private fun ScoreBar(label:String,value:Double){
-        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
-            Text(label,Modifier.width(75.dp),fontSize=12.sp)
-            LinearProgressIndicator(
-                progress={(value/100.0).toFloat().coerceIn(0f,1f)},
-                modifier=Modifier.weight(1f)
+    private fun ScoreBadge(score:Double){
+        Surface(
+            shape=RoundedCornerShape(18.dp),
+            color=MaterialTheme.colorScheme.primaryContainer
+        ){
+            Text(
+                "${fa(score.toInt())}/۱۰۰",
+                Modifier.padding(horizontal=12.dp,vertical=10.dp),
+                fontWeight=FontWeight.Black
             )
-            Text(fa(value.toInt()),Modifier.width(38.dp),fontSize=12.sp)
         }
     }
 
     @Composable
-    private fun HistoryCard(h:QueueHistoryRow){
-        Card(shape=RoundedCornerShape(20.dp)){
-            Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                    Text(h.symbol?:"در حال تکمیل نام",fontWeight=FontWeight.Bold,fontSize=19.sp)
-                    Text("${fa(h.score.toInt())}/۱۰۰",fontWeight=FontWeight.Black)
-                }
-                Text(Jalali.fromGregorianInt(h.date),color=MaterialTheme.colorScheme.primary)
-                Text("زمان صف: ${fmtTime(h.eventTime)}")
-                Text("ارزش صف: ${fmtMoney(h.queueValue)}")
+    private fun WeightedBar(label:String,raw:Double,weight:Int){
+        val contribution=raw/100.0*weight
+        Column{
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                Text(label,fontSize=12.sp)
+                Text(
+                    "${fa(raw.toInt())}/۱۰۰  →  ${Jalali.digits(String.format(Locale.US,"%.1f",contribution))}/$weight",
+                    fontSize=11.sp
+                )
             }
+            LinearProgressIndicator(
+                progress={(raw/100.0).toFloat().coerceIn(0f,1f)},
+                modifier=Modifier.fillMaxWidth()
+            )
         }
     }
 
     @Composable
-    private fun EmptyCard(text:String){
-        Card(shape=RoundedCornerShape(20.dp)){
-            Text(text,Modifier.fillMaxWidth().padding(24.dp),color=Color.Gray)
+    private fun Empty(text:String){
+        Card(shape=RoundedCornerShape(20.dp),modifier=Modifier.fillMaxWidth().padding(top=10.dp)){
+            Text(text,Modifier.padding(24.dp),color=Color.Gray)
         }
     }
 
@@ -334,7 +459,35 @@ class MainActivity:ComponentActivity(){
         )
     }
 
+    private fun startUpdate(){
+        HistoricalWorker.start(this,false)
+        startNameRepair()
+    }
+
+    private fun startAnalyze(){
+        val req=OneTimeWorkRequestBuilder<QueueAnalysisWorker>()
+            .setConstraints(HistoricalWorker.networkConstraint())
+            .setInputData(workDataOf("batchSize" to 240,"parallelism" to 4))
+            .build()
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            QueueAnalysisWorker.ANALYSIS_CHAIN,ExistingWorkPolicy.REPLACE,req
+        )
+    }
+
+    private fun startNameRepair(){
+        val req=OneTimeWorkRequestBuilder<MetadataWorker>()
+            .setConstraints(HistoricalWorker.networkConstraint())
+            .setInputData(workDataOf("batch" to 30))
+            .build()
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            MetadataWorker.CHAIN,ExistingWorkPolicy.REPLACE,req
+        )
+    }
+
     private fun fa(v:Int)=Jalali.digits(v.toString())
+
+    private fun clock(ms:Long):String =
+        Jalali.digits(SimpleDateFormat("HH:mm:ss",Locale.US).format(Date(ms)))
 
     private fun fmtTime(v:Int?):String{
         if(v==null)return "—"
@@ -350,4 +503,7 @@ class MainActivity:ComponentActivity(){
         }
         return Jalali.digits(raw)
     }
+
+    private fun faPrice(v:Double):String =
+        Jalali.digits(String.format(Locale.US,"%.0f",v))
 }
