@@ -44,6 +44,20 @@ class BorsaApp:Application(){
             appPrefs.edit().putBoolean("v18_worker_reset_done",true).apply()
         }
 
+        val catalogPrefs=getSharedPreferences("catalog",MODE_PRIVATE)
+        val now=System.currentTimeMillis()
+        val lastCatalog=catalogPrefs.getLong("last_refresh",0L)
+        if(now-lastCatalog > 12L*60L*60L*1000L){
+            val catalogReq=OneTimeWorkRequestBuilder<SymbolCatalogWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .build()
+            WorkManager.getInstance(this).enqueueUniqueWork(
+                SymbolCatalogWorker.CHAIN,
+                ExistingWorkPolicy.KEEP,
+                catalogReq
+            )
+        }
+
         scheduleBackgroundWork()
     }
 

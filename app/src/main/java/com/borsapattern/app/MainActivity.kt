@@ -64,6 +64,7 @@ class MainActivity:ComponentActivity(){
         val analysisPrefs=remember{getSharedPreferences("analysis",Context.MODE_PRIVATE)}
         val metaPrefs=remember{getSharedPreferences("metadata",Context.MODE_PRIVATE)}
         val nextPrefs=remember{getSharedPreferences("nextday",Context.MODE_PRIVATE)}
+        val catalogPrefs=remember{getSharedPreferences("catalog",Context.MODE_PRIVATE)}
 
         var symbols by remember{mutableStateOf(0)}
         var records by remember{mutableStateOf(0)}
@@ -95,6 +96,7 @@ class MainActivity:ComponentActivity(){
         var analysisTotal by remember{mutableStateOf(0)}
         var metadataStatus by remember{mutableStateOf("آماده")}
         var nextDayStatus by remember{mutableStateOf("آماده")}
+        var catalogStatus by remember{mutableStateOf("در حال آماده‌سازی فهرست نمادها")}
 
         LaunchedEffect(Unit){
             while(true){
@@ -127,6 +129,7 @@ class MainActivity:ComponentActivity(){
                 analysisTotal=analysisPrefs.getInt("analysis_batch_total",0)
                 metadataStatus=metaPrefs.getString("status","آماده")?:"آماده"
                 nextDayStatus=nextPrefs.getString("status","آماده")?:"آماده"
+                catalogStatus=catalogPrefs.getString("status","در حال آماده‌سازی فهرست نمادها")?:"در حال آماده‌سازی فهرست نمادها"
                 delay(1200)
             }
         }
@@ -168,38 +171,10 @@ class MainActivity:ComponentActivity(){
             }
         }
 
-        BoxWithConstraints(
-            Modifier.fillMaxSize()
-                .background(Color(0xFFF6F7FB))
-        ){
-            val compact=maxWidth < 430.dp
-            val sidebarWidth=if(compact) 118.dp else 178.dp
-
-            // Left navigation rail stays physically on the left.
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){
-                Surface(
-                    modifier=Modifier
-                        .width(sidebarWidth)
-                        .fillMaxHeight()
-                        .align(Alignment.CenterStart),
-                    color=Color(0xFF0D1120),
-                    shadowElevation=8.dp
-                ){
-                    SignalSidebar(
-                        compact=compact,
-                        section=section,
-                        onSection={section=it},
-                        onSettings={section=5}
-                    )
-                }
-            }
-
-            // Main content is fully RTL.
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl){
-                Column(
-                    Modifier.fillMaxSize()
-                        .padding(start=sidebarWidth)
-                ){
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl){
+            Scaffold(
+                containerColor=Color(0xFFF6F7FB),
+                topBar={
                     Surface(
                         color=Color.White,
                         shadowElevation=1.dp
@@ -210,9 +185,7 @@ class MainActivity:ComponentActivity(){
                             horizontalArrangement=Arrangement.SpaceBetween,
                             verticalAlignment=Alignment.CenterVertically
                         ){
-                            Column(
-                                horizontalAlignment=Alignment.End
-                            ){
+                            Column(horizontalAlignment=Alignment.End){
                                 Text(
                                     when(section){
                                         0 -> "سیگنال روزانه"
@@ -222,59 +195,108 @@ class MainActivity:ComponentActivity(){
                                         4 -> "پیپر تریدینگ"
                                         else -> "تنظیمات پیشرفته"
                                     },
-                                    fontSize=18.sp,
+                                    fontSize=19.sp,
                                     fontWeight=FontWeight.Black,
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v1.9-test",
+                                    "Signal • v2.0-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
                             }
-                            Surface(
-                                color=Color(0xFFF0EBFF),
-                                shape=RoundedCornerShape(13.dp)
+                            Row(
+                                horizontalArrangement=Arrangement.spacedBy(8.dp),
+                                verticalAlignment=Alignment.CenterVertically
                             ){
-                                Text(
-                                    "S",
-                                    Modifier.padding(horizontal=12.dp,vertical=7.dp),
-                                    color=MaterialTheme.colorScheme.primary,
-                                    fontWeight=FontWeight.Black
-                                )
+                                TextButton(onClick={section=5}){
+                                    Text("⚙",fontSize=20.sp)
+                                }
+                                Surface(
+                                    color=Color(0xFFF0EBFF),
+                                    shape=RoundedCornerShape(13.dp)
+                                ){
+                                    Text(
+                                        "S",
+                                        Modifier.padding(horizontal=12.dp,vertical=7.dp),
+                                        color=MaterialTheme.colorScheme.primary,
+                                        fontWeight=FontWeight.Black
+                                    )
+                                }
                             }
                         }
                     }
-
-                    Box(
-                        Modifier.fillMaxSize()
-                            .padding(horizontal=12.dp)
+                },
+                bottomBar={
+                    NavigationBar(
+                        containerColor=Color.White,
+                        tonalElevation=5.dp
                     ){
-                        when(section){
-                            0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
-                            1 -> DailyBacktest(history)
-                            2 -> SymbolSearchPage(
-                                searchText,{searchText=it},searchResults,
-                                selectedSymbol,selectedSignals,selectedStats,{selectedSymbol=it}
-                            )
-                            3 -> DataExtractionPage(
-                                eligibleCount,syncStatus,syncDone,syncTotal,metadataStatus,
-                                onMarkets={showMarkets=true},
-                                onNames={startNameRepair()},
-                                onStart={symbolsText,years->
-                                    saveExtractionSelection(symbolsText,years)
-                                    startUpdate()
-                                },
-                                onAnalyze={startAnalyze()},
-                                onNextDay={startNextDayCheck()}
-                            )
-                            4 -> PaperTrades(trades)
-                            else -> SettingsPage(
-                                onMarkets={showMarkets=true},
-                                onNames={startNameRepair()},
-                                onUpdate={startUpdate()}
-                            )
-                        }
+                        NavigationBarItem(
+                            selected=section==0,
+                            onClick={section=0},
+                            icon={Text("↗",fontSize=20.sp)},
+                            label={Text("سیگنال",fontSize=9.sp)}
+                        )
+                        NavigationBarItem(
+                            selected=section==3,
+                            onClick={section=3},
+                            icon={Text("▤",fontSize=20.sp)},
+                            label={Text("استخراج",fontSize=9.sp)}
+                        )
+                        NavigationBarItem(
+                            selected=section==1,
+                            onClick={section=1},
+                            icon={Text("◫",fontSize=20.sp)},
+                            label={Text("بک‌تست",fontSize=9.sp)}
+                        )
+                        NavigationBarItem(
+                            selected=section==4,
+                            onClick={section=4},
+                            icon={Text("◔",fontSize=20.sp)},
+                            label={Text("پیپر",fontSize=9.sp)}
+                        )
+                        NavigationBarItem(
+                            selected=section==2,
+                            onClick={section=2},
+                            icon={Text("⌕",fontSize=20.sp)},
+                            label={Text("جستجو",fontSize=9.sp)}
+                        )
+                    }
+                }
+            ){padding->
+                Box(
+                    Modifier.fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal=12.dp)
+                ){
+                    when(section){
+                        0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
+                        1 -> DailyBacktest(history)
+                        2 -> SymbolSearchPage(
+                            searchText,{searchText=it},searchResults,
+                            selectedSymbol,selectedSignals,selectedStats,
+                            catalogStatus,{selectedSymbol=it}
+                        )
+                        3 -> DataExtractionPage(
+                            eligibleCount,syncStatus,syncDone,syncTotal,
+                            metadataStatus,catalogStatus,
+                            onMarkets={showMarkets=true},
+                            onNames={startNameRepair()},
+                            onCatalog={refreshSymbolCatalog()},
+                            onStart={symbolsText,years->
+                                saveExtractionSelection(symbolsText,years)
+                                startUpdate()
+                            },
+                            onAnalyze={startAnalyze()},
+                            onNextDay={startNextDayCheck()}
+                        )
+                        4 -> PaperTrades(trades)
+                        else -> SettingsPage(
+                            onMarkets={showMarkets=true},
+                            onNames={startNameRepair()},
+                            onUpdate={startUpdate()}
+                        )
                     }
                 }
             }
@@ -378,7 +400,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v1.9-test",
+                        "v2.0-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -806,7 +828,8 @@ class MainActivity:ComponentActivity(){
     private fun DataExtractionPage(
         eligibleCount:Int,
         syncStatus:String,syncDone:Int,syncTotal:Int,metadataStatus:String,
-        onMarkets:()->Unit,onNames:()->Unit,
+        catalogStatus:String,
+        onMarkets:()->Unit,onNames:()->Unit,onCatalog:()->Unit,
         onStart:(String,Int)->Unit,onAnalyze:()->Unit,onNextDay:()->Unit
     ){
         var symbolsText by remember{mutableStateOf("")}
@@ -823,6 +846,22 @@ class MainActivity:ComponentActivity(){
                     title="استخراج داده",
                     subtitle="فقط سهام بورس، فرابورس، بازار پایه و صندوق‌های اهرمی"
                 )
+            }
+
+            item{
+                PolishedCard{
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.SpaceBetween,
+                        verticalAlignment=Alignment.CenterVertically
+                    ){
+                        Column(Modifier.weight(1f)){
+                            Text("فهرست نمادها",fontWeight=FontWeight.Black)
+                            Text(catalogStatus,fontSize=11.sp,color=Color(0xFF747785))
+                        }
+                        TextButton(onClick=onCatalog){Text("بازسازی فهرست")}
+                    }
+                }
             }
 
             item{
@@ -918,10 +957,15 @@ class MainActivity:ComponentActivity(){
             item{
                 Button(
                     onClick={showConfirm=true},
+                    enabled=eligibleCount>0,
                     modifier=Modifier.fillMaxWidth().height(52.dp),
                     shape=RoundedCornerShape(16.dp)
                 ){
-                    Text("بررسی و شروع استخراج",fontWeight=FontWeight.Bold)
+                    Text(
+                        if(eligibleCount>0) "بررسی و شروع استخراج"
+                        else "ابتدا فهرست نمادها را بازسازی کنید",
+                        fontWeight=FontWeight.Bold
+                    )
                 }
             }
 
@@ -1223,7 +1267,7 @@ class MainActivity:ComponentActivity(){
     private fun SymbolSearchPage(
         query:String,onQuery:(String)->Unit,results:List<SymbolEntity>,
         selected:SymbolEntity?,signals:List<SymbolSignalRow>,
-        stats:SymbolDetailStats?,onSelect:(SymbolEntity)->Unit
+        stats:SymbolDetailStats?,catalogStatus:String,onSelect:(SymbolEntity)->Unit
     ){
         if(selected!=null){
             LazyColumn(
@@ -1346,7 +1390,13 @@ class MainActivity:ComponentActivity(){
             }
 
             if(query.isNotBlank() && results.isEmpty()){
-                item{PolishedEmpty("نمادی با این عبارت پیدا نشد.")}
+                item{
+                    PolishedEmpty(
+                        if(catalogStatus.contains("آماده شد"))
+                            "نمادی با این عبارت پیدا نشد."
+                        else "فهرست نمادها هنوز آماده نیست. وضعیت: $catalogStatus"
+                    )
+                }
             }
 
             items(results){s->
@@ -1687,6 +1737,21 @@ class MainActivity:ComponentActivity(){
             dismissButton={
                 TextButton(onClick=onDismiss){Text("انصراف")}
             }
+        )
+    }
+
+    private fun refreshSymbolCatalog(){
+        getSharedPreferences("catalog",Context.MODE_PRIVATE)
+            .edit()
+            .putString("status","در حال بازسازی فهرست نمادها")
+            .apply()
+        val req=OneTimeWorkRequestBuilder<SymbolCatalogWorker>()
+            .setConstraints(HistoricalWorker.networkConstraint())
+            .build()
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            SymbolCatalogWorker.CHAIN,
+            ExistingWorkPolicy.REPLACE,
+            req
         )
     }
 
