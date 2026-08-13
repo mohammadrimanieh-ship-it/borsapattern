@@ -22,7 +22,10 @@ data class DailyEntity(
 @Entity(tableName="queue_events",primaryKeys=["insCode","date"])
 data class QueueEventEntity(
     val insCode:String,val date:Int,val eventTime:Int?,val queueValue:Double?,
-    val score:Double,val status:String
+    val score:Double,val status:String,
+    val signalTime:Int?=null,
+    val nextTradingDate:Int?=null,
+    val nextDayQueueStatus:String="PENDING"
 )
 
 @Entity(tableName="live_scores")
@@ -58,7 +61,14 @@ data class PaperTradeEntity(
 
 data class QueueHistoryRow(
     val insCode:String,val symbol:String?,val date:Int,val eventTime:Int?,
-    val queueValue:Double?,val score:Double,val status:String
+    val queueValue:Double?,val score:Double,val status:String,
+    val signalTime:Int?,val nextTradingDate:Int?,val nextDayQueueStatus:String
+)
+
+data class SymbolSignalRow(
+    val insCode:String,val symbol:String?,val date:Int,val signalTime:Int?,
+    val eventTime:Int?,val score:Double,val status:String,
+    val nextTradingDate:Int?,val nextDayQueueStatus:String
 )
 
 @Dao
@@ -160,7 +170,9 @@ interface BorsaDao {
       SELECT e.insCode AS insCode,
              COALESCE(NULLIF(s.symbol,''),NULLIF(s.name,''),'در حال تکمیل نام') AS symbol,
              e.date AS date,e.eventTime AS eventTime,e.queueValue AS queueValue,
-             e.score AS score,e.status AS status
+             e.score AS score,e.status AS status,
+             e.signalTime AS signalTime,e.nextTradingDate AS nextTradingDate,
+             e.nextDayQueueStatus AS nextDayQueueStatus
       FROM queue_events e
       INNER JOIN symbols s ON s.insCode=e.insCode
       WHERE e.status='QUEUE_CONFIRMED'
@@ -193,6 +205,41 @@ interface BorsaDao {
       WHERE id=:id
     """)
     suspend fun closePaperTrade(id:Long,price:Double,exitTime:Long,pnl:Double)
+
+    @Query("""
+      SELECT * FROM symbols
+      WHERE (symbol LIKE '%' || :q || '%' OR name LIKE '%' || :q || '%')
+      ORDER BY CASE WHEN symbol=:q THEN 0 ELSE 1 END, COALESCE(symbol,name)
+      LIMIT :limit
+    """)
+    suspend fun searchSymbols(q:String,limit:Int=30):List<SymbolEntity>
+
+    @Query("""
+      SELECT e.insCode AS insCode,
+             COALESCE(NULLIF(s.symbol,''),NULLIF(s.name,''),'در حال تکمیل نام') AS symbol,
+             e.date AS date,e.signalTime AS signalTime,e.eventTime AS eventTime,
+             e.score AS score,e.status AS status,
+             e.nextTradingDate AS nextTradingDate,e.nextDayQueueStatus AS nextDayQueueStatus
+      FROM queue_events e LEFT JOIN symbols s ON s.insCode=e.insCode
+      WHERE e.insCode=:insCode ORDER BY e.date DESC LIMIT :limit
+    """)
+    suspend fun signalHistoryForSymbol(insCode:String,limit:Int=250):List<SymbolSignalRow>
+
+    @Query("""
+      SELECT * FROM queue_events
+      WHERE status='QUEUE_CONFIRMED' AND nextDayQueueStatus='PENDING'
+      ORDER BY date ASC LIMIT :limit
+    """)
+    suspend fun pendingNextDayChecks(limit:Int):List<QueueEventEntity>
+
+    @Query("SELECT * FROM daily WHERE insCode=:insCode AND date>:date ORDER BY date ASC LIMIT 1")
+    suspend fun nextTradingDaily(insCode:String,date:Int):DailyEntity?
+
+    @Query("""
+      UPDATE queue_events SET nextTradingDate=:nextDate,nextDayQueueStatus=:result
+      WHERE insCode=:insCode AND date=:date
+    """)
+    suspend fun updateNextDayResult(insCode:String,date:Int,nextDate:Int?,result:String)
 }
 
 @Database(
@@ -200,6 +247,6 @@ interface BorsaDao {
         SymbolEntity::class,DailyEntity::class,QueueEventEntity::class,
         LiveScoreEntity::class,PaperTradeEntity::class
     ],
-    version=5,exportSchema=false
+    version=6,exportSchema=false
 )
 abstract class AppDatabase:RoomDatabase(){ abstract fun dao():BorsaDao }

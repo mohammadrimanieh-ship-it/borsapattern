@@ -112,6 +112,7 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             var bidVolume:Double?=null
             var askVolume:Double?=null
             var bestTime:Int?=null
+            var firstSignalTime:Int?=null
             var bestValue=0.0
             var bestImbalance=0.0
             var atHighSeen=false
@@ -130,10 +131,14 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 val qv=bp*bv
                 val imbalance=if(bv+av>0) bv/(bv+av) else 0.0
                 val atHigh=dayHigh>0 && bp>=dayHigh*0.9995
+                val nowTime=firstInt(o,"hEven","time")
+                if(firstSignalTime==null && atHigh && qv>=20_000_000_000.0 && imbalance>=0.65){
+                    firstSignalTime=nowTime
+                }
 
                 if(atHigh && qv>bestValue){
                     bestValue=qv
-                    bestTime=firstInt(o,"hEven","time")
+                    bestTime=nowTime
                     bestImbalance=imbalance
                     atHighSeen=true
                 }
@@ -158,6 +163,7 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                         eventTime=bestTime,
                         queueValue=bestValue,
                         score=score,
+                        signalTime=firstSignalTime,
                         status=if(confirmed)"QUEUE_CONFIRMED" else "NOT_QUEUE"
                     )
                 )

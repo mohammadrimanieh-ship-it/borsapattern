@@ -13,7 +13,7 @@ class BorsaApp:Application(){
     override fun onCreate(){
         super.onCreate()
         db=Room.databaseBuilder(this,AppDatabase::class.java,"borsa.db")
-            .addMigrations(MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6)
             .build()
         Notifications.createChannel(this)
         scheduleBackgroundWork()
@@ -42,14 +42,6 @@ class BorsaApp:Application(){
             "category_repair",
             ExistingWorkPolicy.REPLACE,
             OneTimeWorkRequestBuilder<CategoryRepairWorker>().build()
-        )
-
-        WorkManager.getInstance(this).enqueueUniqueWork(
-            MetadataWorker.CHAIN,ExistingWorkPolicy.KEEP,
-            OneTimeWorkRequestBuilder<MetadataWorker>()
-                .setConstraints(net)
-                .setInputData(workDataOf("batch" to 30))
-                .build()
         )
     }
 
@@ -99,6 +91,14 @@ class BorsaApp:Application(){
                 db.execSQL(
                     "ALTER TABLE symbols ADD COLUMN instrumentType TEXT NOT NULL DEFAULT 'TYPE_STOCK'"
                 )
+            }
+        }
+
+        val MIGRATION_5_6=object:Migration(5,6){
+            override fun migrate(db:SupportSQLiteDatabase){
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN signalTime INTEGER")
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN nextTradingDate INTEGER")
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN nextDayQueueStatus TEXT NOT NULL DEFAULT 'PENDING'")
             }
         }
     }

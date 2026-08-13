@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -54,6 +55,7 @@ class MainActivity:ComponentActivity(){
         val syncPrefs=remember{getSharedPreferences("sync",Context.MODE_PRIVATE)}
         val analysisPrefs=remember{getSharedPreferences("analysis",Context.MODE_PRIVATE)}
         val metaPrefs=remember{getSharedPreferences("metadata",Context.MODE_PRIVATE)}
+        val nextPrefs=remember{getSharedPreferences("nextday",Context.MODE_PRIVATE)}
 
         var symbols by remember{mutableStateOf(0)}
         var records by remember{mutableStateOf(0)}
@@ -67,6 +69,10 @@ class MainActivity:ComponentActivity(){
         var trades by remember{mutableStateOf(emptyList<PaperTradeEntity>())}
 
         var section by remember{mutableIntStateOf(0)}
+        var searchText by remember{mutableStateOf("")}
+        var searchResults by remember{mutableStateOf(emptyList<SymbolEntity>())}
+        var selectedSymbol by remember{mutableStateOf<SymbolEntity?>(null)}
+        var selectedSignals by remember{mutableStateOf(emptyList<SymbolSignalRow>())}
         var liveEnabled by remember{mutableStateOf(false)}
         var lastLiveScan by remember{mutableStateOf<Long?>(null)}
         var showMarkets by remember{mutableStateOf(false)}
@@ -78,6 +84,7 @@ class MainActivity:ComponentActivity(){
         var analysisDone by remember{mutableStateOf(0)}
         var analysisTotal by remember{mutableStateOf(0)}
         var metadataStatus by remember{mutableStateOf("آماده")}
+        var nextDayStatus by remember{mutableStateOf("آماده")}
 
         LaunchedEffect(Unit){
             while(true){
@@ -101,7 +108,24 @@ class MainActivity:ComponentActivity(){
                 analysisDone=analysisPrefs.getInt("analysis_batch_done",0)
                 analysisTotal=analysisPrefs.getInt("analysis_batch_total",0)
                 metadataStatus=metaPrefs.getString("status","آماده")?:"آماده"
+                nextDayStatus=nextPrefs.getString("status","آماده")?:"آماده"
                 delay(1200)
+            }
+        }
+
+        LaunchedEffect(searchText){
+            if(searchText.trim().isNotEmpty()){
+                delay(250); searchResults=app.db.dao().searchSymbols(searchText.trim(),30)
+            }else searchResults=emptyList()
+        }
+        LaunchedEffect(selectedSymbol?.insCode){
+            selectedSignals=selectedSymbol?.let{app.db.dao().signalHistoryForSymbol(it.insCode,250)} ?: emptyList()
+        }
+        BackHandler(enabled=true){
+            when{
+                selectedSymbol!=null -> selectedSymbol=null
+                section!=0 -> section=0
+                else -> finish()
             }
         }
 
@@ -121,11 +145,23 @@ class MainActivity:ComponentActivity(){
                 Surface(shadowElevation=4.dp){
                     Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=12.dp)){
                         Text("Borsa Pattern",fontSize=30.sp,fontWeight=FontWeight.Black)
-                        Text(
-                            "رصد بازار • الگو • تکنیکال • Paper Trading",
-                            color=MaterialTheme.colorScheme.primary,
-                            fontSize=13.sp
-                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement=Arrangement.SpaceBetween,
+                            verticalAlignment=Alignment.CenterVertically
+                        ){
+                            Text(
+                                "رصد بازار • الگو • تکنیکال • Paper Trading",
+                                color=MaterialTheme.colorScheme.primary,
+                                fontSize=13.sp
+                            )
+                            Text(
+                                "v1.2.1",
+                                color=Color.Gray,
+                                fontSize=11.sp,
+                                fontWeight=FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -142,7 +178,17 @@ class MainActivity:ComponentActivity(){
                     Tab(section==1,{section=1},text={Text("فرصت‌ها")})
                     Tab(section==2,{section=2},text={Text("تاریخچه")})
                     Tab(section==3,{section=3},text={Text("آزمایشی")})
-                    Tab(section==4,{section=4},text={Text("تنظیمات")})
+                    Tab(section==4,{section=4},text={Text("جستجو 🔎")})
+                    Tab(section==5,{section=5},text={Text("تنظیمات")})
+                }
+
+                if(section==0){
+                    FilledTonalButton(
+                        onClick={section=4},
+                        modifier=Modifier.fillMaxWidth().padding(top=6.dp)
+                    ){
+                        Text("🔎 جستجوی نماد و تاریخچه سیگنال")
+                    }
                 }
 
                 when(section){
@@ -158,6 +204,7 @@ class MainActivity:ComponentActivity(){
                     1 -> Opportunities(scores)
                     2 -> QueueHistory(history)
                     3 -> PaperTrades(trades)
+                    4 -> SymbolSearchPage(searchText,{searchText=it},searchResults,selectedSymbol,selectedSignals,{selectedSymbol=it})
                     else -> SettingsPage(
                         onMarkets={showMarkets=true},
                         onNames={startNameRepair()},
@@ -343,6 +390,42 @@ class MainActivity:ComponentActivity(){
         }
     }
 
+
+    @Composable
+    private fun SymbolSearchPage(
+        query:String,onQuery:(String)->Unit,results:List<SymbolEntity>,
+        selected:SymbolEntity?,signals:List<SymbolSignalRow>,onSelect:(SymbolEntity)->Unit
+    ){
+        if(selected!=null){
+            LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp),contentPadding=PaddingValues(vertical=10.dp)){
+                item{Card(shape=RoundedCornerShape(20.dp)){Column(Modifier.padding(16.dp)){
+                    Text(selected.symbol?:selected.name?:"نماد",fontSize=22.sp,fontWeight=FontWeight.Black)
+                    Text("تاریخچه زمان‌های هشدار الگو",fontSize=12.sp)
+                }}}
+                items(signals){s->Card(shape=RoundedCornerShape(16.dp)){Column(Modifier.padding(14.dp)){
+                    Text(Jalali.fromGregorianInt(s.date),fontWeight=FontWeight.Bold)
+                    Text("هشدار: ${fmtTime(s.signalTime)}  •  صف/رخداد: ${fmtTime(s.eventTime)}")
+                    Text("امتیاز: ${fa(s.score.toInt())}/۱۰۰")
+                    Text(when(s.nextDayQueueStatus){
+                        "QUEUE_AGAIN"->"روز بعد: صف خرید ماند ✅"
+                        "NOT_QUEUE_NEXT_DAY"->"روز بعد: صف نماند"
+                        "NO_NEXT_DAY"->"روز بعد: داده موجود نیست"
+                        else->"روز بعد: بررسی نشده"
+                    },color=MaterialTheme.colorScheme.primary)
+                }}}
+            }
+            return
+        }
+        LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp),contentPadding=PaddingValues(vertical=10.dp)){
+            item{OutlinedTextField(value=query,onValueChange=onQuery,modifier=Modifier.fillMaxWidth(),
+                singleLine=true,label={Text("جستجوی نماد")})}
+            items(results){s->Card(onClick={onSelect(s)},shape=RoundedCornerShape(16.dp)){Column(Modifier.padding(14.dp)){
+                Text(s.symbol?:s.name?:"نماد",fontWeight=FontWeight.Bold,fontSize=18.sp)
+                if(!s.name.isNullOrBlank()&&s.name!=s.symbol) Text(s.name!!,fontSize=11.sp,color=Color.Gray)
+            }}}
+        }
+    }
+
     @Composable
     private fun SettingsPage(onMarkets:()->Unit,onNames:()->Unit,onUpdate:()->Unit){
         LazyColumn(
@@ -357,6 +440,11 @@ class MainActivity:ComponentActivity(){
             }
             item{
                 FilledTonalButton(onClick=onUpdate,modifier=Modifier.fillMaxWidth()){Text("همگام‌سازی داده‌های جدید")}
+            }
+            item{
+                FilledTonalButton(onClick={startNextDayCheck()},modifier=Modifier.fillMaxWidth()){
+                    Text("بررسی ماندگاری صف در روز معاملاتی بعد")
+                }
             }
             item{
                 Card(shape=RoundedCornerShape(18.dp)){
@@ -532,7 +620,6 @@ class MainActivity:ComponentActivity(){
 
     private fun startUpdate(){
         HistoricalWorker.start(this,false)
-        startNameRepair()
     }
 
     private fun startAnalyze(){
@@ -542,6 +629,14 @@ class MainActivity:ComponentActivity(){
             .build()
         WorkManager.getInstance(this).enqueueUniqueWork(
             QueueAnalysisWorker.ANALYSIS_CHAIN,ExistingWorkPolicy.REPLACE,req
+        )
+    }
+
+    private fun startNextDayCheck(){
+        val req=OneTimeWorkRequestBuilder<NextDayQueueWorker>()
+            .setConstraints(HistoricalWorker.networkConstraint()).build()
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            NextDayQueueWorker.CHAIN,ExistingWorkPolicy.REPLACE,req
         )
     }
 
