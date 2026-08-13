@@ -111,7 +111,11 @@ class MainActivity:ComponentActivity(){
         var specialReopenCount by remember{mutableStateOf(0)}
         var preopenDay1Excluded by remember{mutableStateOf(0)}
         var twoDayQueueCount by remember{mutableStateOf(0)}
+        var positiveContinuationCount by remember{mutableStateOf(0)}
         var strongPreopenNextDay by remember{mutableStateOf(0)}
+        var fragileQueueCount by remember{mutableStateOf(0)}
+        var avgPersistence by remember{mutableStateOf(0.0)}
+        var avgQueueDuration by remember{mutableStateOf(0.0)}
         var learnedKnown by remember{mutableStateOf(0)}
         var learnedSuccess by remember{mutableStateOf(0)}
         var learnedRate by remember{mutableStateOf(0f)}
@@ -127,6 +131,7 @@ class MainActivity:ComponentActivity(){
         var detect10 by remember{mutableStateOf(0f)}
         var detect5 by remember{mutableStateOf(0f)}
         var falsePositiveRate by remember{mutableStateOf(0f)}
+        var precisionRate by remember{mutableStateOf(0f)}
         var preQueueSnapshots by remember{mutableStateOf(0)}
 
         LaunchedEffect(Unit){
@@ -164,7 +169,11 @@ class MainActivity:ComponentActivity(){
                 specialReopenCount=app.db.dao().specialReopenCount()
                 preopenDay1Excluded=app.db.dao().preopenDay1ExcludedCount()
                 twoDayQueueCount=app.db.dao().twoDayQueueCount()
+                positiveContinuationCount=app.db.dao().positiveContinuationCount()
                 strongPreopenNextDay=app.db.dao().strongPreopenNextDayCount()
+                fragileQueueCount=app.db.dao().fragileQueueCount()
+                avgPersistence=app.db.dao().averagePersistenceRatio() ?: 0.0
+                avgQueueDuration=app.db.dao().averageQueueDuration() ?: 0.0
 
                 learnedKnown=queueLearningPrefs.getInt("total_known",0)
                 learnedSuccess=queueLearningPrefs.getInt("success_count",0)
@@ -182,6 +191,7 @@ class MainActivity:ComponentActivity(){
                 detect10=preQueuePrefs.getFloat("rate_10",0f)
                 detect5=preQueuePrefs.getFloat("rate_5",0f)
                 falsePositiveRate=preQueuePrefs.getFloat("false_positive_rate",0f)
+                precisionRate=preQueuePrefs.getFloat("precision",0f)
                 preQueueSnapshots=preQueuePrefs.getInt("snapshot_count",0)
 
                 syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
@@ -275,7 +285,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.5-test",
+                                    "Signal • v2.6-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -352,7 +362,11 @@ class MainActivity:ComponentActivity(){
                             specialReopenCount=specialReopenCount,
                             preopenDay1Excluded=preopenDay1Excluded,
                             twoDayQueueCount=twoDayQueueCount,
+                            positiveContinuationCount=positiveContinuationCount,
                             strongPreopenNextDay=strongPreopenNextDay,
+                            fragileQueueCount=fragileQueueCount,
+                            avgPersistence=avgPersistence,
+                            avgQueueDuration=avgQueueDuration,
                             learnedKnown=learnedKnown,
                             learnedSuccess=learnedSuccess,
                             learnedRate=learnedRate,
@@ -368,6 +382,7 @@ class MainActivity:ComponentActivity(){
                             detect10=detect10,
                             detect5=detect5,
                             falsePositiveRate=falsePositiveRate,
+                            precisionRate=precisionRate,
                             preQueueSnapshots=preQueueSnapshots
                         )
                         2 -> SymbolSearchPage(
@@ -386,8 +401,7 @@ class MainActivity:ComponentActivity(){
                                 saveExtractionSelection(if(mode=="QUICK") 1 else 5)
                                 startUpdate(mode)
                             },
-                            onAnalyze={startAnalyze()},
-                            onNextDay={startNextDayCheck()}
+                            onAnalyze={startAnalyze()}
                         )
                         4 -> PaperTrades(trades)
                         else -> SettingsPage(
@@ -498,7 +512,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.5-test",
+                        "v2.6-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -819,7 +833,11 @@ class MainActivity:ComponentActivity(){
         specialReopenCount:Int,
         preopenDay1Excluded:Int,
         twoDayQueueCount:Int,
+        positiveContinuationCount:Int,
         strongPreopenNextDay:Int,
+        fragileQueueCount:Int,
+        avgPersistence:Double,
+        avgQueueDuration:Double,
         learnedKnown:Int,
         learnedSuccess:Int,
         learnedRate:Float,
@@ -831,14 +849,17 @@ class MainActivity:ComponentActivity(){
         preQueueStatus:String,
         detect30:Float,detect20:Float,detect15:Float,detect10:Float,detect5:Float,
         falsePositiveRate:Float,
+        precisionRate:Float,
         preQueueSnapshots:Int
     ){
-        var onlyTwoDay by remember{mutableStateOf(true)}
-        val twoDay=history.filter{
-            it.nextDayQueueStatus=="QUEUE_AGAIN" ||
-            it.nextDayQueueStatus=="PREOPEN_QUEUE_NEXT_DAY"
+        var onlyContinuation by remember{mutableStateOf(true)}
+        val continuation=history.filter{
+            it.nextDayQueueStatus in setOf(
+                "PREOPEN_QUEUE_NEXT_DAY","QUEUE_AGAIN",
+                "POSITIVE_STRONG_NEXT_DAY","POSITIVE_NEXT_DAY"
+            )
         }
-        val visible=if(onlyTwoDay) twoDay else history
+        val visible=if(onlyContinuation) continuation else history
         val grouped=visible.groupBy{it.date}.toSortedMap(compareByDescending{it})
 
         LazyColumn(
@@ -848,8 +869,8 @@ class MainActivity:ComponentActivity(){
             item{
                 PageHero(
                     eyebrow="QUEUE PATTERN",
-                    title="الگوی صف خرید دو روزه",
-                    subtitle="فقط صف‌های واقعی 09:00 تا 12:30؛ بازگشایی‌های بدون دامنه حذف شده‌اند"
+                    title="پیش‌بینی صف خرید پایدار",
+                    subtitle="فقط صف‌های ادامه‌دار روز اول؛ نتیجه مثبت روز کاری بعد داخل همان تحلیل است"
                 )
             }
 
@@ -888,6 +909,11 @@ class MainActivity:ComponentActivity(){
                             Modifier.weight(1f)
                         )
                         MetricPill(
+                            "Precision",
+                            "${fa((precisionRate*100).toInt())}٪",
+                            Modifier.weight(1f)
+                        )
+                        MetricPill(
                             "False Positive",
                             "${fa((falsePositiveRate*100).toInt())}٪",
                             Modifier.weight(1f)
@@ -902,8 +928,8 @@ class MainActivity:ComponentActivity(){
                     horizontalArrangement=Arrangement.spacedBy(8.dp)
                 ){
                     SummaryTile(
-                        title="صف دو روزه",
-                        value=fa(twoDayQueueCount),
+                        title="ادامه مثبت روز بعد",
+                        value=fa(positiveContinuationCount),
                         bg=Color(0xFFE5F7EC),
                         modifier=Modifier.weight(1f)
                     )
@@ -914,12 +940,42 @@ class MainActivity:ComponentActivity(){
                         modifier=Modifier.weight(1f)
                     )
                     SummaryTile(
-                        title="ماندگاری روز بعد",
+                        title="نتیجه مثبت روز بعد",
                         value=if(learnedKnown>0)
                             "${fa((learnedRate*100).toInt())}٪"
                         else "—",
                         bg=Color(0xFFF2ECFF),
                         modifier=Modifier.weight(1f)
+                    )
+                }
+            }
+
+            item{
+                PolishedCard{
+                    Text("کیفیت صف روز سیگنال",fontSize=16.sp,fontWeight=FontWeight.Black)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(7.dp)
+                    ){
+                        MetricPill(
+                            "میانگین دوام",
+                            "${fa(avgQueueDuration.toInt())} دقیقه",
+                            Modifier.weight(1f)
+                        )
+                        MetricPill(
+                            "پایداری",
+                            "${fa((avgPersistence*100).toInt())}٪",
+                            Modifier.weight(1f)
+                        )
+                        MetricPill(
+                            "صف شکننده حذف‌شده",
+                            fa(fragileQueueCount),
+                            Modifier.weight(1f)
+                        )
+                    }
+                    Text(
+                        "صف لحظه‌ای یا شکننده دیگر نمونه مثبت مدل نیست؛ فقط صفی وارد یادگیری می‌شود که بعد از تشکیل، دوام قابل‌قبول داشته باشد.",
+                        fontSize=10.sp,color=Color(0xFF747785)
                     )
                 }
             }
@@ -1014,14 +1070,14 @@ class MainActivity:ComponentActivity(){
                     horizontalArrangement=Arrangement.spacedBy(8.dp)
                 ){
                     FilterChip(
-                        selected=onlyTwoDay,
-                        onClick={onlyTwoDay=true},
-                        label={Text("فقط صف دو روزه (${fa(twoDay.size)})")},
+                        selected=onlyContinuation,
+                        onClick={onlyContinuation=true},
+                        label={Text("ادامه مثبت روز بعد (${fa(continuation.size)})")},
                         modifier=Modifier.weight(1f)
                     )
                     FilterChip(
-                        selected=!onlyTwoDay,
-                        onClick={onlyTwoDay=false},
+                        selected=!onlyContinuation,
+                        onClick={onlyContinuation=false},
                         label={Text("همه صف‌های معتبر (${fa(history.size)})")},
                         modifier=Modifier.weight(1f)
                     )
@@ -1031,8 +1087,8 @@ class MainActivity:ComponentActivity(){
             if(grouped.isEmpty()){
                 item{
                     PolishedEmpty(
-                        if(onlyTwoDay)
-                            "هنوز سهمی با صف خرید معتبر در روز جاری و روز معاملاتی بعد پیدا نشده است."
+                        if(onlyContinuation)
+                            "هنوز سیگنال پایدار با نتیجه مثبت در روز کاری بعد پیدا نشده است."
                         else
                             "هنوز نتیجه تحلیل صف‌های معتبر ثبت نشده است."
                     )
@@ -1060,13 +1116,13 @@ class MainActivity:ComponentActivity(){
                                         fontWeight=FontWeight.Black
                                     )
                                     Surface(
-                                        color=if(onlyTwoDay) Color(0xFFE4F6EA) else Color(0xFFF0EBFF),
+                                        color=if(onlyContinuation) Color(0xFFE4F6EA) else Color(0xFFF0EBFF),
                                         shape=RoundedCornerShape(12.dp)
                                     ){
                                         Text(
                                             "${fa(rows.size)} نماد",
                                             Modifier.padding(horizontal=10.dp,vertical=5.dp),
-                                            color=if(onlyTwoDay) Color(0xFF118658) else MaterialTheme.colorScheme.primary,
+                                            color=if(onlyContinuation) Color(0xFF118658) else MaterialTheme.colorScheme.primary,
                                             fontSize=11.sp,
                                             fontWeight=FontWeight.Bold
                                         )
@@ -1107,9 +1163,26 @@ class MainActivity:ComponentActivity(){
                                                 color=Color(0xFF727583)
                                             )
                                             Text(
+                                                "دوام ${fa(s.queueDurationMinutes)} دقیقه • پایداری ${fa((s.queuePersistenceRatio*100).toInt())}٪ • شکست ${fa(s.queueBreakCount)} بار" +
+                                                    if(s.queueEndHeld) " • پایان بازار: صف حفظ شد" else "",
+                                                fontSize=10.sp,
+                                                color=Color(0xFF666A78)
+                                            )
+                                            s.nextDayReturnPct?.let{ret->
+                                                Text(
+                                                    "بازده روز کاری بعد: ${if(ret>=0) "+" else ""}${Jalali.digits(String.format(Locale.US,"%.2f",ret))}٪",
+                                                    fontSize=10.sp,
+                                                    color=if(ret>=0) Color(0xFF118658) else Color(0xFFB85A5A)
+                                                )
+                                            }
+                                            Text(
                                                 when(s.nextDayQueueStatus){
                                                     "PREOPEN_QUEUE_NEXT_DAY" -> "روز بعد از پیش‌گشایش صف خرید بود ★ موفقیت خیلی قوی"
                                                     "QUEUE_AGAIN" -> "روز معاملاتی بعد در تایم عادی صف خرید شد ✓"
+                                                    "POSITIVE_STRONG_NEXT_DAY" -> "روز کاری بعد مثبت قوی بود ✓"
+                                                    "POSITIVE_NEXT_DAY" -> "روز کاری بعد مثبت بود ✓"
+                                                    "FLAT_NEXT_DAY" -> "روز کاری بعد خنثی بود"
+                                                    "NEGATIVE_NEXT_DAY" -> "روز کاری بعد منفی بود"
                                                     "NOT_QUEUE_NEXT_DAY" -> "روز معاملاتی بعد صف خرید نشد"
                                                     "NEXT_DAY_SPECIAL_REOPEN" -> "روز بعد بازگشایی ویژه بود؛ از الگو حذف شد"
                                                     "NO_NEXT_DAY" -> "داده روز معاملاتی بعد موجود نیست"
@@ -1119,6 +1192,9 @@ class MainActivity:ComponentActivity(){
                                                 color=when(s.nextDayQueueStatus){
                                                     "PREOPEN_QUEUE_NEXT_DAY" -> Color(0xFF087A53)
                                                     "QUEUE_AGAIN" -> Color(0xFF118658)
+                                                    "POSITIVE_STRONG_NEXT_DAY" -> Color(0xFF118658)
+                                                    "POSITIVE_NEXT_DAY" -> Color(0xFF3A8C68)
+                                                    "NEGATIVE_NEXT_DAY" -> Color(0xFFB85A5A)
                                                     "NOT_QUEUE_NEXT_DAY" -> Color(0xFFB85A5A)
                                                     "NEXT_DAY_SPECIAL_REOPEN" -> Color(0xFFD08B00)
                                                     else -> Color(0xFF777A87)
@@ -1143,7 +1219,7 @@ class MainActivity:ComponentActivity(){
         syncStatus:String,syncDone:Int,syncTotal:Int,metadataStatus:String,
         catalogStatus:String,
         onMarkets:()->Unit,onSymbolsUpdate:()->Unit,
-        onStart:(String)->Unit,onAnalyze:()->Unit,onNextDay:()->Unit
+        onStart:(String)->Unit,onAnalyze:()->Unit
     ){
         var selectedMode by remember{mutableStateOf("QUICK")}
         var showConfirm by remember{mutableStateOf(false)}
@@ -1313,20 +1389,12 @@ class MainActivity:ComponentActivity(){
             }
 
             item{
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement=Arrangement.spacedBy(8.dp)
+                FilledTonalButton(
+                    onClick=onAnalyze,
+                    modifier=Modifier.fillMaxWidth(),
+                    shape=RoundedCornerShape(14.dp)
                 ){
-                    FilledTonalButton(
-                        onClick=onAnalyze,
-                        modifier=Modifier.weight(1f),
-                        shape=RoundedCornerShape(14.dp)
-                    ){Text("تحلیل تاریخی",fontSize=11.sp)}
-                    FilledTonalButton(
-                        onClick=onNextDay,
-                        modifier=Modifier.weight(1f),
-                        shape=RoundedCornerShape(14.dp)
-                    ){Text("صف روز بعد",fontSize=11.sp)}
+                    Text("اجرای تحلیل یکپارچه صف پایدار + روز بعد",fontSize=11.sp)
                 }
             }
         }
@@ -1677,7 +1745,11 @@ class MainActivity:ComponentActivity(){
                                     when(s.nextDayQueueStatus){
                                         "PREOPEN_QUEUE_NEXT_DAY"->"روز بعد از پیش‌گشایش صف خرید بود ★"
                                         "QUEUE_AGAIN"->"روز بعد در تایم عادی صف خرید شد ✓"
-                                        "NOT_QUEUE_NEXT_DAY"->"روز بعد صف نماند"
+                                        "POSITIVE_STRONG_NEXT_DAY"->"روز بعد مثبت قوی بود ✓"
+                                        "POSITIVE_NEXT_DAY"->"روز بعد مثبت بود ✓"
+                                        "FLAT_NEXT_DAY"->"روز بعد خنثی بود"
+                                        "NEGATIVE_NEXT_DAY"->"روز بعد منفی بود"
+                                        "NOT_QUEUE_NEXT_DAY"->"روز بعد صف نشد"
                                         "NO_NEXT_DAY"->"داده روز بعد موجود نیست"
                                         else->"روز بعد هنوز بررسی نشده"
                                     },
@@ -1685,10 +1757,28 @@ class MainActivity:ComponentActivity(){
                                     color=when(s.nextDayQueueStatus){
                                         "PREOPEN_QUEUE_NEXT_DAY"->Color(0xFF087A53)
                                         "QUEUE_AGAIN"->Color(0xFF118658)
+                                        "POSITIVE_STRONG_NEXT_DAY"->Color(0xFF118658)
+                                        "POSITIVE_NEXT_DAY"->Color(0xFF3A8C68)
+                                        "NEGATIVE_NEXT_DAY"->Color(0xFFB85A5A)
                                         "NOT_QUEUE_NEXT_DAY"->Color(0xFFB85A5A)
                                         else->Color(0xFF777A86)
                                     }
                                 )
+                                if(s.eventTime!=null){
+                                    Text(
+                                        "دوام صف ${fa(s.queueDurationMinutes)} دقیقه • پایداری ${fa((s.queuePersistenceRatio*100).toInt())}٪ • شکست ${fa(s.queueBreakCount)} بار" +
+                                            if(s.queueEndHeld) " • پایان بازار: صف حفظ شد" else "",
+                                        fontSize=10.sp,
+                                        color=Color(0xFF626675)
+                                    )
+                                }
+                                s.nextDayReturnPct?.let{ret->
+                                    Text(
+                                        "بازده روز کاری بعد: ${if(ret>=0) "+" else ""}${Jalali.digits(String.format(Locale.US,"%.2f",ret))}٪",
+                                        fontSize=10.sp,
+                                        color=if(ret>=0) Color(0xFF118658) else Color(0xFFB85A5A)
+                                    )
+                                }
                                 val snaps=preQueue
                                     .filter{it.date==s.date && it.label==1}
                                     .sortedByDescending{it.minutesBefore}
@@ -1835,11 +1925,7 @@ class MainActivity:ComponentActivity(){
             item{
                 FilledTonalButton(onClick=onUpdate,modifier=Modifier.fillMaxWidth()){Text("همگام‌سازی داده‌های جدید")}
             }
-            item{
-                FilledTonalButton(onClick={startNextDayCheck()},modifier=Modifier.fillMaxWidth()){
-                    Text("بررسی ماندگاری صف در روز معاملاتی بعد")
-                }
-            }
+
             item{
                 Card(shape=RoundedCornerShape(18.dp)){
                     Text(

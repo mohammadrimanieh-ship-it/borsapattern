@@ -15,7 +15,7 @@ class BorsaApp:Application(){
         db=Room.databaseBuilder(this,AppDatabase::class.java,"borsa.db")
             .addMigrations(
                 MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,
-                MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7
+                MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8
             )
             .build()
         Notifications.createChannel(this)
@@ -196,6 +196,16 @@ class BorsaApp:Application(){
                         PRIMARY KEY(insCode,date,minutesBefore)
                     )
                 """.trimIndent())
+            }
+        }
+        val MIGRATION_7_8=object:Migration(7,8){
+            override fun migrate(db:SupportSQLiteDatabase){
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN queueDurationMinutes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN queuePersistenceRatio REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN queueBreakCount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN queueEndHeld INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN queueValueRetention REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE queue_events ADD COLUMN nextDayReturnPct REAL")
             }
         }
     }

@@ -22,7 +22,7 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         val c=sql.query("""
             SELECT e.insCode,e.date,e.eventTime,e.status
             FROM queue_events e
-            WHERE e.status IN ('QUEUE_CONFIRMED','NOT_QUEUE')
+            WHERE e.status IN ('QUEUE_CONFIRMED','NOT_QUEUE','FRAGILE_QUEUE')
               AND NOT EXISTS(
                 SELECT 1 FROM prequeue_snapshots p
                 WHERE p.insCode=e.insCode AND p.date=e.date
@@ -148,7 +148,7 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                     detected=metrics.score>=70.0
                 )
             }
-        }else if(status=="NOT_QUEUE"){
+        }else if(status=="NOT_QUEUE" || status=="FRAGILE_QUEUE"){
             // Negative samples are evaluated at fixed intraday moments.
             val negatives=listOf(
                 -100 to 100000,
@@ -280,6 +280,25 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                 )
             }
         }
+        val precisionCursor=db.query("""
+            SELECT
+              SUM(CASE WHEN label=1 AND detected=1 THEN 1 ELSE 0 END),
+              SUM(CASE WHEN label=0 AND detected=1 THEN 1 ELSE 0 END)
+            FROM prequeue_snapshots
+            WHERE label IN (0,1)
+        """.trimIndent())
+        precisionCursor.use{
+            if(it.moveToFirst()){
+                val tp=if(it.isNull(0))0 else it.getInt(0)
+                val fp=if(it.isNull(1))0 else it.getInt(1)
+                edit.putInt("true_positive",tp)
+                edit.putFloat(
+                    "precision",
+                    if(tp+fp>0) tp.toFloat()/(tp+fp).toFloat() else 0f
+                )
+            }
+        }
+
         edit.putInt("snapshot_count",runCatching{daoCountSync()}.getOrDefault(0))
         edit.putLong("updated_at",System.currentTimeMillis())
         edit.apply()

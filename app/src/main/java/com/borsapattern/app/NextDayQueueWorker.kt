@@ -54,13 +54,18 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
 
     private suspend fun checkOne(e:QueueEventEntity){
         val next=dao.nextTradingDaily(e.insCode,e.date) ?: run {
-            dao.updateNextDayResult(e.insCode,e.date,null,"NO_NEXT_DAY")
+            dao.updateNextDayResult(e.insCode,e.date,null,"NO_NEXT_DAY",null)
             return
         }
 
         if(PatternEngine.isLikelySpecialReopen(dao,e.insCode,next.date)){
+            val specialLast=next.last
+            val specialYesterday=next.yesterday
+            val specialReturn=if(
+                specialLast!=null && specialYesterday!=null && specialYesterday>0
+            ) (specialLast/specialYesterday-1.0)*100.0 else null
             dao.updateNextDayResult(
-                e.insCode,e.date,next.date,"NEXT_DAY_SPECIAL_REOPEN"
+                e.insCode,e.date,next.date,"NEXT_DAY_SPECIAL_REOPEN",specialReturn
             )
             return
         }
@@ -99,13 +104,24 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 }
             }
 
+            val nextLast=next.last
+            val nextYesterday=next.yesterday
+            val returnPct=if(
+                nextLast!=null && nextYesterday!=null && nextYesterday>0
+            ) (nextLast/nextYesterday-1.0)*100.0 else null
+
+            val result=when{
+                preopenOk -> "PREOPEN_QUEUE_NEXT_DAY"
+                intradayOk -> "QUEUE_AGAIN"
+                returnPct!=null && returnPct>=2.0 -> "POSITIVE_STRONG_NEXT_DAY"
+                returnPct!=null && returnPct>0.0 -> "POSITIVE_NEXT_DAY"
+                returnPct!=null && returnPct>=-0.5 -> "FLAT_NEXT_DAY"
+                returnPct!=null -> "NEGATIVE_NEXT_DAY"
+                else -> "NOT_QUEUE_NEXT_DAY"
+            }
+
             dao.updateNextDayResult(
-                e.insCode,e.date,next.date,
-                when{
-                    preopenOk -> "PREOPEN_QUEUE_NEXT_DAY"
-                    intradayOk -> "QUEUE_AGAIN"
-                    else -> "NOT_QUEUE_NEXT_DAY"
-                }
+                e.insCode,e.date,next.date,result,returnPct
             )
         }catch(_:Exception){}
     }

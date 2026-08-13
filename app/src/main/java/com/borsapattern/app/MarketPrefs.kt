@@ -90,8 +90,23 @@ object MarketPrefs {
 
 
     fun isLeveragedFund(symbol:String?,name:String?):Boolean{
-        val text="${symbol?:""} ${name?:""}"
-        return text.contains("اهرمی") || text.contains("اهرم")
+        val s=(symbol?:"").trim()
+            .replace(" ","")
+            .replace("\u200c","")
+        val n=(name?:"").trim()
+        val text="$s $n"
+
+        // Fallback aliases are used when TSETMC metadata is incomplete.
+        // Name-based detection remains the primary rule.
+        val knownAliases=setOf(
+            "اهرم","توان","شتاب","موج","جهش","بیدار","دوایکس"
+        )
+
+        return text.contains("اهرمی") ||
+            text.contains("اهرم") ||
+            text.contains("دو برابر") ||
+            text.contains("2x",ignoreCase=true) ||
+            knownAliases.contains(s)
     }
 
     fun isSignalUniverse(
@@ -104,12 +119,18 @@ object MarketPrefs {
             segment==BOURSE || segment==FARABOURSE ||
             segment==BASE_YELLOW || segment==BASE_ORANGE || segment==BASE_RED
 
-        if(!allowedMarket) return false
         if(instrumentType==TYPE_OPTION) return false
 
+        val leveraged=
+            instrumentType==TYPE_FUND && isLeveragedFund(symbol,name)
+
+        // Leveraged ETFs are allowed even if TSETMC board metadata is temporarily missing;
+        // their fund identity is independently recognized.
+        if(leveraged) return true
+        if(!allowedMarket) return false
+
         return instrumentType==TYPE_STOCK ||
-            instrumentType==TYPE_BASE ||
-            (instrumentType==TYPE_FUND && isLeveragedFund(symbol,name))
+            instrumentType==TYPE_BASE
     }
 
     fun classify(flow:Int?, board:String?):String{
@@ -137,6 +158,8 @@ object MarketPrefs {
         val text="$s $n $b"
 
         return when{
+            isLeveragedFund(s,n) -> TYPE_FUND
+
             b.contains("زرد") || b.contains("نارنجی") || b.contains("قرمز") ||
                 text.contains("بازار پایه") -> TYPE_BASE
 

@@ -25,7 +25,13 @@ data class QueueEventEntity(
     val score:Double,val status:String,
     val signalTime:Int?=null,
     val nextTradingDate:Int?=null,
-    val nextDayQueueStatus:String="PENDING"
+    val nextDayQueueStatus:String="PENDING",
+    val queueDurationMinutes:Int=0,
+    val queuePersistenceRatio:Double=0.0,
+    val queueBreakCount:Int=0,
+    val queueEndHeld:Boolean=false,
+    val queueValueRetention:Double=0.0,
+    val nextDayReturnPct:Double?=null
 )
 
 @Entity(
@@ -80,13 +86,19 @@ data class PaperTradeEntity(
 data class QueueHistoryRow(
     val insCode:String,val symbol:String?,val date:Int,val eventTime:Int?,
     val queueValue:Double?,val score:Double,val status:String,
-    val signalTime:Int?,val nextTradingDate:Int?,val nextDayQueueStatus:String
+    val signalTime:Int?,val nextTradingDate:Int?,val nextDayQueueStatus:String,
+    val queueDurationMinutes:Int,val queuePersistenceRatio:Double,
+    val queueBreakCount:Int,val queueEndHeld:Boolean,
+    val queueValueRetention:Double,val nextDayReturnPct:Double?
 )
 
 data class SymbolSignalRow(
     val insCode:String,val symbol:String?,val date:Int,val signalTime:Int?,
     val eventTime:Int?,val score:Double,val status:String,
-    val nextTradingDate:Int?,val nextDayQueueStatus:String
+    val nextTradingDate:Int?,val nextDayQueueStatus:String,
+    val queueDurationMinutes:Int,val queuePersistenceRatio:Double,
+    val queueBreakCount:Int,val queueEndHeld:Boolean,
+    val queueValueRetention:Double,val nextDayReturnPct:Double?
 )
 
 data class SymbolDetailStats(
@@ -122,6 +134,7 @@ interface BorsaDao {
     @Query("SELECT COUNT(*) FROM daily") suspend fun dailyCount():Int
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='CANDIDATE'") suspend fun candidateCount():Int
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='QUEUE_CONFIRMED'") suspend fun confirmedCount():Int
+    @Query("SELECT COUNT(*) FROM queue_events WHERE status='FRAGILE_QUEUE'") suspend fun fragileQueueCount():Int
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='NOT_QUEUE'") suspend fun rejectedCount():Int
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='ERROR'") suspend fun errorCount():Int
     @Query("SELECT MAX(date) FROM daily") suspend fun latestMarketDate():Int?
@@ -237,12 +250,34 @@ interface BorsaDao {
     @Query("""
       SELECT COUNT(*) FROM queue_events
       WHERE status='QUEUE_CONFIRMED'
+        AND nextDayQueueStatus IN (
+          'PREOPEN_QUEUE_NEXT_DAY','QUEUE_AGAIN',
+          'POSITIVE_STRONG_NEXT_DAY','POSITIVE_NEXT_DAY'
+        )
+    """)
+    suspend fun positiveContinuationCount():Int
+
+    @Query("""
+      SELECT COUNT(*) FROM queue_events
+      WHERE status='QUEUE_CONFIRMED'
         AND nextDayQueueStatus='PREOPEN_QUEUE_NEXT_DAY'
     """)
     suspend fun strongPreopenNextDayCount():Int
 
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='PREOPEN_QUEUE'")
     suspend fun preopenDay1ExcludedCount():Int
+
+    @Query("""
+      SELECT AVG(queuePersistenceRatio) FROM queue_events
+      WHERE status='QUEUE_CONFIRMED'
+    """)
+    suspend fun averagePersistenceRatio():Double?
+
+    @Query("""
+      SELECT AVG(queueDurationMinutes) FROM queue_events
+      WHERE status='QUEUE_CONFIRMED'
+    """)
+    suspend fun averageQueueDuration():Double?
 
     @Query("UPDATE queue_events SET status='CANDIDATE' WHERE status='ERROR'")
     suspend fun retryErrors()
@@ -253,7 +288,13 @@ interface BorsaDao {
              e.date AS date,e.eventTime AS eventTime,e.queueValue AS queueValue,
              e.score AS score,e.status AS status,
              e.signalTime AS signalTime,e.nextTradingDate AS nextTradingDate,
-             e.nextDayQueueStatus AS nextDayQueueStatus
+             e.nextDayQueueStatus AS nextDayQueueStatus,
+             e.queueDurationMinutes AS queueDurationMinutes,
+             e.queuePersistenceRatio AS queuePersistenceRatio,
+             e.queueBreakCount AS queueBreakCount,
+             e.queueEndHeld AS queueEndHeld,
+             e.queueValueRetention AS queueValueRetention,
+             e.nextDayReturnPct AS nextDayReturnPct
       FROM queue_events e
       INNER JOIN symbols s ON s.insCode=e.insCode
       WHERE e.status='QUEUE_CONFIRMED'
@@ -285,6 +326,7 @@ interface BorsaDao {
               COALESCE(s.symbol,'') LIKE '%اهرم%'
               OR COALESCE(s.name,'') LIKE '%اهرم%'
               OR COALESCE(s.name,'') LIKE '%اهرمی%'
+              OR COALESCE(s.symbol,'') IN ('توان','شتاب','موج','جهش','بیدار','دوایکس')
             )
           )
         )
@@ -336,7 +378,13 @@ interface BorsaDao {
              COALESCE(NULLIF(s.symbol,''),NULLIF(s.name,''),'در حال تکمیل نام') AS symbol,
              e.date AS date,e.signalTime AS signalTime,e.eventTime AS eventTime,
              e.score AS score,e.status AS status,
-             e.nextTradingDate AS nextTradingDate,e.nextDayQueueStatus AS nextDayQueueStatus
+             e.nextTradingDate AS nextTradingDate,e.nextDayQueueStatus AS nextDayQueueStatus,
+             e.queueDurationMinutes AS queueDurationMinutes,
+             e.queuePersistenceRatio AS queuePersistenceRatio,
+             e.queueBreakCount AS queueBreakCount,
+             e.queueEndHeld AS queueEndHeld,
+             e.queueValueRetention AS queueValueRetention,
+             e.nextDayReturnPct AS nextDayReturnPct
       FROM queue_events e LEFT JOIN symbols s ON s.insCode=e.insCode
       WHERE e.insCode=:insCode ORDER BY e.date DESC LIMIT :limit
     """)
@@ -368,10 +416,15 @@ interface BorsaDao {
     suspend fun nextTradingDaily(insCode:String,date:Int):DailyEntity?
 
     @Query("""
-      UPDATE queue_events SET nextTradingDate=:nextDate,nextDayQueueStatus=:result
+      UPDATE queue_events
+      SET nextTradingDate=:nextDate,
+          nextDayQueueStatus=:result,
+          nextDayReturnPct=:returnPct
       WHERE insCode=:insCode AND date=:date
     """)
-    suspend fun updateNextDayResult(insCode:String,date:Int,nextDate:Int?,result:String)
+    suspend fun updateNextDayResult(
+        insCode:String,date:Int,nextDate:Int?,result:String,returnPct:Double?=null
+    )
 }
 
 @Database(
@@ -380,6 +433,6 @@ interface BorsaDao {
         PreQueueSnapshotEntity::class,
         LiveScoreEntity::class,PaperTradeEntity::class
     ],
-    version=7,exportSchema=false
+    version=8,exportSchema=false
 )
 abstract class AppDatabase:RoomDatabase(){ abstract fun dao():BorsaDao }

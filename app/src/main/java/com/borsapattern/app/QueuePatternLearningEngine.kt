@@ -13,7 +13,9 @@ object QueuePatternLearningEngine {
           FROM queue_events
           WHERE status='QUEUE_CONFIRMED'
             AND nextDayQueueStatus IN (
-              'PREOPEN_QUEUE_NEXT_DAY','QUEUE_AGAIN','NOT_QUEUE_NEXT_DAY'
+              'PREOPEN_QUEUE_NEXT_DAY','QUEUE_AGAIN',
+              'POSITIVE_STRONG_NEXT_DAY','POSITIVE_NEXT_DAY',
+              'FLAT_NEXT_DAY','NEGATIVE_NEXT_DAY','NOT_QUEUE_NEXT_DAY'
             )
             AND signalTime BETWEEN 90000 AND 123000
           ORDER BY date ASC
@@ -40,12 +42,21 @@ object QueuePatternLearningEngine {
                 val score=if(it.isNull(2)) 0.0 else it.getDouble(2)
                 val status=it.getString(3)
                 val strong=status=="PREOPEN_QUEUE_NEXT_DAY"
-                val ok=strong || status=="QUEUE_AGAIN"
+                val queueAgain=status=="QUEUE_AGAIN"
+                val positiveStrong=status=="POSITIVE_STRONG_NEXT_DAY"
+                val positive=status=="POSITIVE_NEXT_DAY"
+                val ok=strong || queueAgain || positiveStrong || positive
 
                 total++
                 if(ok){
                     success++
-                    weightedSuccess += if(strong) 1.20 else 1.0
+                    weightedSuccess += when{
+                        strong -> 1.20
+                        queueAgain -> 1.00
+                        positiveStrong -> 0.75
+                        positive -> 0.50
+                        else -> 0.0
+                    }
                     if(strong) strongSuccess++
                     if(t>0) successTimes+=t
                     if(q>0) successValues+=q

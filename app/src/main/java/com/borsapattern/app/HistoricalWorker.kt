@@ -2,7 +2,7 @@ package com.borsapattern.app
 
 import android.content.Context
 import androidx.work.*
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.*
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
@@ -103,9 +103,14 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                         MarketPrefs.isLeveragedFund(it.symbol,it.name)
                     )
 
+                val isLeveraged=
+                    effectiveType==MarketPrefs.TYPE_FUND &&
+                    MarketPrefs.isLeveragedFund(it.symbol,it.name)
+
                 val segmentAllowed =
-                    effectiveSegment!=MarketPrefs.OTHER &&
-                    wantedSegments.contains(effectiveSegment)
+                    if(isLeveraged) true
+                    else effectiveSegment!=MarketPrefs.OTHER &&
+                        wantedSegments.contains(effectiveSegment)
 
                 segmentAllowed &&
                 wantedTypes.contains(effectiveType) &&
@@ -147,65 +152,50 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 .putBoolean("sync_running",true)
                 .apply()
 
-            for(idx in start until end){
-                val s=symbols[idx]
+            val parallelism=if(mode=="QUICK") 6 else 3
+            var chunkStart=start
+
+            while(chunkStart<end){
+                val chunkEnd=min(chunkStart+parallelism,end)
                 try{
-                    val latest=dao.latestDateFor(s.insCode)?:0
-                    val earliest=dao.earliestDateFor(s.insCode)
-                    val coverageEnough=earliest!=null && earliest<=cutoffInt
-                    val recentEnough=latest>=freshCutoff
-
-                    if(!(coverageEnough && recentEnough)){
-                        val d=api.jsonArrayFrom(api.dailyRaw(s.insCode),"closingPriceDaily")
-                        val rows=mutableListOf<DailyEntity>()
-
-                        for(j in 0 until d.length()){
-                            val o=d.optJSONObject(j)?:continue
-                            val date=firstInt(o,"dEven","date")?:continue
-                            if(date<cutoffInt) continue
-
-                            rows += DailyEntity(
-                                insCode=s.insCode,
-                                date=date,
-                                high=firstDouble(o,"priceMax","pmax","pMax"),
-                                last=firstDouble(o,"pDrCotVal","pl","lastPrice"),
-                                yesterday=firstDouble(o,"priceYesterday","py","yesterdayPrice"),
-                                volume=firstDouble(o,"qTotTran5J","volume"),
-                                value=firstDouble(o,"qTotCap","value")
-                            )
-                        }
-                        if(rows.isNotEmpty()) dao.upsertDaily(rows)
+                    coroutineScope{
+                        (chunkStart until chunkEnd).map{idx->
+                            async(Dispatchers.IO){
+                                downloadHistoryFor(
+                                    symbols[idx],cutoffInt,freshCutoff
+                                )
+                            }
+                        }.awaitAll()
                     }
                 }catch(e:CancellationException){
                     prefs.edit()
-                        .putInt("resume_offset",idx)
+                        .putInt("resume_offset",chunkStart)
                         .putBoolean("resume_pending",true)
                         .putBoolean("sync_running",false)
                         .putString(
                             "sync_status",
-                            "استخراج موقتاً متوقف شد؛ ادامه از نماد ${idx+1} ذخیره شد"
+                            "استخراج موقتاً متوقف شد؛ ادامه از ${chunkStart+1} ذخیره شد"
                         )
                         .apply()
                     throw e
-                }catch(_:Exception){
-                    // خطای یک نماد نباید بقیه دانلود را متوقف کند.
                 }
 
                 prefs.edit()
-                    .putInt("sync_done",idx+1)
-                    .putInt("resume_offset",idx+1)
+                    .putInt("sync_done",chunkEnd)
+                    .putInt("resume_offset",chunkEnd)
                     .putBoolean("resume_pending",true)
                     .putString(
                         "sync_status",
-                        "${if(mode=="QUICK") "استخراج سریع" else "تکمیل عمیق"}: ${idx+1} از $total نماد"
+                        "${if(mode=="QUICK") "استخراج سریع موازی" else "تکمیل عمیق"}: $chunkEnd از $total نماد"
                     )
                     .apply()
 
                 setProgress(workDataOf(
-                    "stage" to "همگام‌سازی ${s.symbol ?: s.name ?: "نماد"}",
-                    "done" to idx+1,
+                    "stage" to if(mode=="QUICK") "استخراج سریع موازی" else "تکمیل عمیق",
+                    "done" to chunkEnd,
                     "total" to total
                 ))
+                chunkStart=chunkEnd
             }
 
             if(end<total){
@@ -284,6 +274,42 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
         }
     }
 
+    private suspend fun downloadHistoryFor(
+        s:SymbolEntity,
+        cutoffInt:Int,
+        freshCutoff:Int
+    ){
+        try{
+            val latest=dao.latestDateFor(s.insCode)?:0
+            val earliest=dao.earliestDateFor(s.insCode)
+            val coverageEnough=earliest!=null && earliest<=cutoffInt
+            val recentEnough=latest>=freshCutoff
+            if(coverageEnough && recentEnough) return
+
+            val d=api.jsonArrayFrom(api.dailyRaw(s.insCode),"closingPriceDaily")
+            val rows=mutableListOf<DailyEntity>()
+            for(j in 0 until d.length()){
+                val o=d.optJSONObject(j)?:continue
+                val date=firstInt(o,"dEven","date")?:continue
+                if(date<cutoffInt) continue
+                rows += DailyEntity(
+                    insCode=s.insCode,
+                    date=date,
+                    high=firstDouble(o,"priceMax","pmax","pMax"),
+                    last=firstDouble(o,"pDrCotVal","pl","lastPrice"),
+                    yesterday=firstDouble(o,"priceYesterday","py","yesterdayPrice"),
+                    volume=firstDouble(o,"qTotTran5J","volume"),
+                    value=firstDouble(o,"qTotCap","value")
+                )
+            }
+            if(rows.isNotEmpty()) dao.upsertDaily(rows)
+        }catch(e:CancellationException){
+            throw e
+        }catch(_:Exception){
+            // یک نماد خراب نباید کل batch را متوقف کند.
+        }
+    }
+
     companion object{
         const val HISTORY_CHAIN="history_sync_chain"
 
@@ -310,7 +336,7 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 .setConstraints(networkConstraint())
                 .setInputData(workDataOf(
                     "offset" to resume,
-                    "batchSize" to if(mode=="QUICK") 18 else 10,
+                    "batchSize" to if(mode=="QUICK") 24 else 12,
                     "userConfirmed" to true,
                     "mode" to mode
                 ))
