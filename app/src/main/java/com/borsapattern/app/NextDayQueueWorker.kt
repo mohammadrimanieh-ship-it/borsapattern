@@ -42,6 +42,8 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             var bp:Double?=null; var bv:Double?=null; var av:Double?=null; var ok=false
             for(i in 0 until arr.length()){
                 val o=arr.optJSONObject(i)?:continue
+                val rowTime=firstInt(o,"hEven","time")
+                if(rowTime!=null && rowTime<90000) continue
                 if((firstInt(o,"number","level")?:1)!=1) continue
                 firstDouble(o,"pMeDem","bidPrice")?.let{bp=it}
                 firstDouble(o,"qTitMeDem","bidVolume")?.let{bv=it}

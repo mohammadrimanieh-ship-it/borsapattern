@@ -89,6 +89,30 @@ object MarketPrefs {
         else -> "سایر"
     }
 
+
+    fun isLeveragedFund(symbol:String?,name:String?):Boolean{
+        val text="${symbol?:""} ${name?:""}"
+        return text.contains("اهرمی") || text.contains("اهرم")
+    }
+
+    fun isSignalUniverse(
+        segment:String,
+        instrumentType:String,
+        symbol:String?,
+        name:String?
+    ):Boolean{
+        val allowedMarket=
+            segment==BOURSE || segment==FARABOURSE ||
+            segment==BASE_YELLOW || segment==BASE_ORANGE || segment==BASE_RED
+
+        if(!allowedMarket) return false
+        if(instrumentType==TYPE_OPTION) return false
+
+        return instrumentType==TYPE_STOCK ||
+            instrumentType==TYPE_BASE ||
+            (instrumentType==TYPE_FUND && isLeveragedFund(symbol,name))
+    }
+
     fun classify(flow:Int?, board:String?):String{
         val b=(board?:"").trim()
         return when{

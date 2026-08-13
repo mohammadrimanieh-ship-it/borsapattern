@@ -74,6 +74,7 @@ class MainActivity:ComponentActivity(){
         var searchResults by remember{mutableStateOf(emptyList<SymbolEntity>())}
         var selectedSymbol by remember{mutableStateOf<SymbolEntity?>(null)}
         var selectedSignals by remember{mutableStateOf(emptyList<SymbolSignalRow>())}
+        var selectedStats by remember{mutableStateOf<SymbolDetailStats?>(null)}
         var liveEnabled by remember{mutableStateOf(false)}
         var lastLiveScan by remember{mutableStateOf<Long?>(null)}
         var showMarkets by remember{mutableStateOf(false)}
@@ -98,7 +99,7 @@ class MainActivity:ComponentActivity(){
                 rejected=app.db.dao().rejectedCount()
                 errors=app.db.dao().errorCount()
                 latest=app.db.dao().latestMarketDate()
-                scores=app.db.dao().topScoresFor(segs,types)
+                scores=app.db.dao().topSignalScores()
                 history=app.db.dao().confirmedHistoryFor(segs,types)
                 trades=app.db.dao().recentPaperTrades(100)
 
@@ -120,7 +121,18 @@ class MainActivity:ComponentActivity(){
             }else searchResults=emptyList()
         }
         LaunchedEffect(selectedSymbol?.insCode){
-            selectedSignals=selectedSymbol?.let{app.db.dao().signalHistoryForSymbol(it.insCode,250)} ?: emptyList()
+            val s=selectedSymbol
+            if(s==null){
+                selectedSignals=emptyList()
+                selectedStats=null
+            }else{
+                selectedSignals=runCatching{
+                    app.db.dao().signalHistoryForSymbol(s.insCode,250)
+                }.getOrDefault(emptyList())
+                selectedStats=runCatching{
+                    app.db.dao().symbolDetailStats(s.insCode)
+                }.getOrNull()
+            }
         }
         BackHandler(enabled=true){
             when{
@@ -145,7 +157,7 @@ class MainActivity:ComponentActivity(){
             topBar={
                 Surface(shadowElevation=4.dp){
                     Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=12.dp)){
-                        Text("Borsa Pattern",fontSize=30.sp,fontWeight=FontWeight.Black)
+                        Text("Signal",fontSize=30.sp,fontWeight=FontWeight.Black)
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement=Arrangement.SpaceBetween,
@@ -157,7 +169,7 @@ class MainActivity:ComponentActivity(){
                                 fontSize=13.sp
                             )
                             Text(
-                                "v1.3.1-test",
+                                "v1.4.1-test",
                                 color=Color.Gray,
                                 fontSize=11.sp,
                                 fontWeight=FontWeight.Bold
@@ -187,7 +199,7 @@ class MainActivity:ComponentActivity(){
                     1 -> DailyBacktest(history)
                     2 -> SymbolSearchPage(
                         searchText,{searchText=it},searchResults,
-                        selectedSymbol,selectedSignals,{selectedSymbol=it}
+                        selectedSymbol,selectedSignals,selectedStats,{selectedSymbol=it}
                     )
                     3 -> DataExtractionPage(
                         syncStatus,syncDone,syncTotal,metadataStatus,
@@ -546,25 +558,69 @@ class MainActivity:ComponentActivity(){
     @Composable
     private fun SymbolSearchPage(
         query:String,onQuery:(String)->Unit,results:List<SymbolEntity>,
-        selected:SymbolEntity?,signals:List<SymbolSignalRow>,onSelect:(SymbolEntity)->Unit
+        selected:SymbolEntity?,signals:List<SymbolSignalRow>,
+        stats:SymbolDetailStats?,onSelect:(SymbolEntity)->Unit
     ){
         if(selected!=null){
-            LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp),contentPadding=PaddingValues(vertical=10.dp)){
-                item{Card(shape=RoundedCornerShape(20.dp)){Column(Modifier.padding(16.dp)){
-                    Text(selected.symbol?:selected.name?:"نماد",fontSize=22.sp,fontWeight=FontWeight.Black)
-                    Text("تاریخچه زمان‌های هشدار الگو",fontSize=12.sp)
-                }}}
-                items(signals){s->Card(shape=RoundedCornerShape(16.dp)){Column(Modifier.padding(14.dp)){
-                    Text(Jalali.fromGregorianInt(s.date),fontWeight=FontWeight.Bold)
-                    Text("هشدار: ${fmtTime(s.signalTime)}  •  صف/رخداد: ${fmtTime(s.eventTime)}")
-                    Text("امتیاز: ${fa(s.score.toInt())}/۱۰۰")
-                    Text(when(s.nextDayQueueStatus){
-                        "QUEUE_AGAIN"->"روز بعد: صف خرید ماند ✅"
-                        "NOT_QUEUE_NEXT_DAY"->"روز بعد: صف نماند"
-                        "NO_NEXT_DAY"->"روز بعد: داده موجود نیست"
-                        else->"روز بعد: بررسی نشده"
-                    },color=MaterialTheme.colorScheme.primary)
-                }}}
+            LazyColumn(
+                verticalArrangement=Arrangement.spacedBy(8.dp),
+                contentPadding=PaddingValues(vertical=10.dp)
+            ){
+                item{
+                    Card(shape=RoundedCornerShape(20.dp)){
+                        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
+                            Text(selected.symbol?:selected.name?:"نماد",fontSize=22.sp,fontWeight=FontWeight.Black)
+                            if(!selected.name.isNullOrBlank() && selected.name!=selected.symbol){
+                                Text(selected.name!!,fontSize=12.sp,color=Color.Gray)
+                            }
+                            Text("تاریخچه زمان‌های هشدار الگو",fontSize=13.sp,fontWeight=FontWeight.Bold)
+                            Text(
+                                "رکورد تاریخی: ${fa(stats?.recordCount ?: 0)}",
+                                fontSize=12.sp
+                            )
+                            if(stats?.firstDate!=null && stats.lastDate!=null){
+                                Text(
+                                    "بازه داده: ${Jalali.fromGregorianInt(stats.firstDate)} تا ${Jalali.fromGregorianInt(stats.lastDate)}",
+                                    fontSize=11.sp,color=Color.Gray
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if(signals.isEmpty()){
+                    item{
+                        Card(shape=RoundedCornerShape(18.dp)){
+                            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+                                Text("هنوز سیگنال تاریخی ثبت نشده",fontWeight=FontWeight.Bold)
+                                Text(
+                                    "برای این نماد هنوز رخداد قابل نمایش در دیتاست تحلیل‌شده وجود ندارد. بعد از تکمیل استخراج و تحلیل تاریخی، زمان‌های هشدار اینجا ظاهر می‌شوند.",
+                                    fontSize=12.sp,
+                                    color=Color.Gray
+                                )
+                            }
+                        }
+                    }
+                }else{
+                    items(signals){s->
+                        Card(shape=RoundedCornerShape(16.dp)){
+                            Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(3.dp)){
+                                Text(Jalali.fromGregorianInt(s.date),fontWeight=FontWeight.Bold)
+                                Text("هشدار: ${fmtTime(s.signalTime)}  •  صف/رخداد: ${fmtTime(s.eventTime)}")
+                                Text("امتیاز: ${fa(s.score.toInt())}/۱۰۰")
+                                Text(
+                                    when(s.nextDayQueueStatus){
+                                        "QUEUE_AGAIN"->"روز بعد: صف خرید ماند ✅"
+                                        "NOT_QUEUE_NEXT_DAY"->"روز بعد: صف نماند"
+                                        "NO_NEXT_DAY"->"روز بعد: داده موجود نیست"
+                                        else->"روز بعد: بررسی نشده"
+                                    },
+                                    color=MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
             }
             return
         }
@@ -575,10 +631,24 @@ class MainActivity:ComponentActivity(){
                 Card(
                     modifier=Modifier.fillMaxWidth().clickable{onSelect(s)},
                     shape=RoundedCornerShape(16.dp)
-                ){Column(Modifier.padding(14.dp)){
-                Text(s.symbol?:s.name?:"نماد",fontWeight=FontWeight.Bold,fontSize=18.sp)
-                if(!s.name.isNullOrBlank()&&s.name!=s.symbol) Text(s.name!!,fontSize=11.sp,color=Color.Gray)
-            }}}
+                ){
+                    Row(
+                        Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement=Arrangement.SpaceBetween,
+                        verticalAlignment=Alignment.CenterVertically
+                    ){
+                        Column(Modifier.weight(1f)){
+                            Text(s.symbol?:s.name?:"نماد",fontWeight=FontWeight.Bold,fontSize=18.sp)
+                            if(!s.name.isNullOrBlank()&&s.name!=s.symbol){
+                                Text(s.name!!,fontSize=11.sp,color=Color.Gray)
+                            }
+                        }
+                        TextButton(onClick={onSelect(s)}){
+                            Text("جزئیات")
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -4,7 +4,9 @@
     <application
         android:name=".BorsaApp"
         android:allowBackup="true"
-        android:label="Borsa Pattern"
+        android:label="Signal"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.BorsaPattern">
         <activity
             android:name=".MainActivity"

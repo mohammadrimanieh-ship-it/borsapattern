@@ -119,6 +119,8 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
             for(i in 0 until arr.length()){
                 val o=arr.optJSONObject(i)?:continue
+                val rowTime=firstInt(o,"hEven","time")
+                if(rowTime!=null && rowTime<90000) continue
                 if((firstInt(o,"number","level")?:1)!=1) continue
 
                 firstDouble(o,"pMeDem","bidPrice")?.let{bidPrice=it}
@@ -131,7 +133,7 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 val qv=bp*bv
                 val imbalance=if(bv+av>0) bv/(bv+av) else 0.0
                 val atHigh=dayHigh>0 && bp>=dayHigh*0.9995
-                val nowTime=firstInt(o,"hEven","time")
+                val nowTime=rowTime ?: firstInt(o,"hEven","time")
                 if(firstSignalTime==null && atHigh && qv>=20_000_000_000.0 && imbalance>=0.65){
                     firstSignalTime=nowTime
                 }

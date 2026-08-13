@@ -4,14 +4,19 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import java.time.LocalTime
+import java.time.ZoneId
 
 object LiveScanEngine {
     suspend fun scanOnce(context:Context):Int=withContext(Dispatchers.IO){
         val app=context.applicationContext as BorsaApp
         val dao=app.db.dao()
         val api=TsetmcClient()
-        val wantedSegments=MarketPrefs.selectedSegments(context)
-        val wantedTypes=MarketPrefs.selectedTypes(context)
+        val nowIran=LocalTime.now(ZoneId.of("Asia/Tehran"))
+        if(!nowIran.isBefore(LocalTime.of(8,45)) && nowIran.isBefore(LocalTime.of(9,0))){
+            return@withContext 0
+        }
+
         val arr=api.jsonArrayFrom(api.marketWatchRaw(),"marketwatch","marketWatch")
         val previous=dao.allSymbols().associateBy{it.insCode}
 
@@ -34,14 +39,20 @@ object LiveScanEngine {
             val board=firstString(o,"cgrValCotTitle","boardTitle")
             val meta=previous[ins]
             val segment=meta?.segment ?: MarketPrefs.classify(flow,board)
-            val type=MarketPrefs.classifyType(
+            val type=meta?.instrumentType ?: MarketPrefs.classifyType(
                 cleanSymbol(rawSymbol,ins),
                 rawName,
                 flow,
                 board
             )
-            if(type==MarketPrefs.TYPE_OPTION) continue
-            if(!wantedSegments.contains(segment) || !wantedTypes.contains(type)) continue
+
+            val eventTime=firstInt(o,"hEven","time")
+            if(eventTime!=null && eventTime in 84500..85959) continue
+
+            val signalName=meta?.name ?: rawName
+            val signalSymbol=meta?.symbol ?: cleanSymbol(rawSymbol,ins)
+            if(!MarketPrefs.isSignalUniverse(segment,type,signalSymbol,signalName)) continue
+
             raws += Raw(ins,rawSymbol,rawName,flow,board,last,y,vol,value)
         }
 

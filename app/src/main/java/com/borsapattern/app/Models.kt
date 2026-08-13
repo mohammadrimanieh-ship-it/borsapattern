@@ -71,6 +71,12 @@ data class SymbolSignalRow(
     val nextTradingDate:Int?,val nextDayQueueStatus:String
 )
 
+data class SymbolDetailStats(
+    val recordCount:Int,
+    val firstDate:Int?,
+    val lastDate:Int?
+)
+
 @Dao
 interface BorsaDao {
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun upsertSymbols(items:List<SymbolEntity>)
@@ -185,6 +191,38 @@ interface BorsaDao {
         types:List<String>,
         limit:Int=1000
     ):List<QueueHistoryRow>
+
+    @Query("""
+      SELECT l.insCode AS insCode,
+             COALESCE(NULLIF(s.symbol,''),NULLIF(s.name,''),NULLIF(l.symbol,''),'در حال تکمیل نام') AS symbol,
+             l.score AS score,l.reason AS reason,l.updatedAt AS updatedAt,
+             l.patternScore AS patternScore,l.technicalScore AS technicalScore,
+             l.volumeScore AS volumeScore,l.rsi AS rsi,l.macd AS macd,
+             l.actorScore AS actorScore,l.lastPrice AS lastPrice
+      FROM live_scores l
+      INNER JOIN symbols s ON s.insCode=l.insCode
+      WHERE s.segment IN ('BOURSE','FARABOURSE','BASE_YELLOW','BASE_ORANGE','BASE_RED')
+        AND (
+          s.instrumentType IN ('TYPE_STOCK','TYPE_BASE')
+          OR (
+            s.instrumentType='TYPE_FUND'
+            AND (
+              COALESCE(s.symbol,'') LIKE '%اهرم%'
+              OR COALESCE(s.name,'') LIKE '%اهرم%'
+              OR COALESCE(s.name,'') LIKE '%اهرمی%'
+            )
+          )
+        )
+        AND s.instrumentType!='TYPE_OPTION'
+      ORDER BY l.score DESC LIMIT 80
+    """)
+    suspend fun topSignalScores():List<LiveScoreEntity>
+
+    @Query("""
+      SELECT COUNT(*) AS recordCount, MIN(date) AS firstDate, MAX(date) AS lastDate
+      FROM daily WHERE insCode=:insCode
+    """)
+    suspend fun symbolDetailStats(insCode:String):SymbolDetailStats
 
     @Query("SELECT * FROM paper_trades WHERE status='OPEN' AND insCode=:insCode LIMIT 1")
     suspend fun openPaperTrade(insCode:String):PaperTradeEntity?
