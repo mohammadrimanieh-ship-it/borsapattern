@@ -13,7 +13,7 @@ class BorsaApp:Application(){
     override fun onCreate(){
         super.onCreate()
         db=Room.databaseBuilder(this,AppDatabase::class.java,"borsa.db")
-            .addMigrations(MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,MIGRATION_4_5)
             .build()
         Notifications.createChannel(this)
         scheduleBackgroundWork()
@@ -36,6 +36,12 @@ class BorsaApp:Application(){
             "live_monitor",ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<LiveWorker>(15,TimeUnit.MINUTES)
                 .setConstraints(net).build()
+        )
+
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            "category_repair",
+            ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<CategoryRepairWorker>().build()
         )
 
         WorkManager.getInstance(this).enqueueUniqueWork(
@@ -85,6 +91,14 @@ class BorsaApp:Application(){
                         pnlPct REAL NOT NULL
                     )
                 """.trimIndent())
+            }
+        }
+
+        val MIGRATION_4_5=object:Migration(4,5){
+            override fun migrate(db:SupportSQLiteDatabase){
+                db.execSQL(
+                    "ALTER TABLE symbols ADD COLUMN instrumentType TEXT NOT NULL DEFAULT 'TYPE_STOCK'"
+                )
             }
         }
     }

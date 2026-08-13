@@ -10,7 +10,8 @@ object LiveScanEngine {
         val app=context.applicationContext as BorsaApp
         val dao=app.db.dao()
         val api=TsetmcClient()
-        val wanted=MarketPrefs.selected(context)
+        val wantedSegments=MarketPrefs.selectedSegments(context)
+        val wantedTypes=MarketPrefs.selectedTypes(context)
         val arr=api.jsonArrayFrom(api.marketWatchRaw(),"marketwatch","marketWatch")
         val previous=dao.allSymbols().associateBy{it.insCode}
 
@@ -33,7 +34,13 @@ object LiveScanEngine {
             val board=firstString(o,"cgrValCotTitle","boardTitle")
             val meta=previous[ins]
             val segment=meta?.segment ?: MarketPrefs.classify(flow,board)
-            if(!wanted.contains(segment)) continue
+            val type=MarketPrefs.classifyType(
+                cleanSymbol(rawSymbol,ins),
+                rawName,
+                flow,
+                board
+            )
+            if(!wantedSegments.contains(segment) || !wantedTypes.contains(type)) continue
             raws += Raw(ins,rawSymbol,rawName,flow,board,last,y,vol,value)
         }
 

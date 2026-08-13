@@ -9,7 +9,8 @@ data class SymbolEntity(
     val name:String?,
     val flow:Int?=null,
     val segment:String="OTHER",
-    val boardTitle:String?=null
+    val boardTitle:String?=null,
+    val instrumentType:String="TYPE_STOCK"
 )
 
 @Entity(tableName="daily",primaryKeys=["insCode","date"])
@@ -83,6 +84,9 @@ interface BorsaDao {
     @Query("SELECT * FROM symbols WHERE insCode=:insCode LIMIT 1")
     suspend fun symbolByCode(insCode:String):SymbolEntity?
 
+    @Query("UPDATE symbols SET instrumentType=:type WHERE insCode=:insCode")
+    suspend fun updateInstrumentType(insCode:String,type:String)
+
     @Query("""
       SELECT * FROM symbols
       WHERE symbol IS NULL OR TRIM(symbol)='' OR symbol=insCode OR symbol GLOB '[0-9]*'
@@ -122,17 +126,29 @@ interface BorsaDao {
       FROM live_scores l
       LEFT JOIN symbols s ON s.insCode=l.insCode
       WHERE COALESCE(s.segment,'OTHER') IN (:segments)
+        AND COALESCE(s.instrumentType,'TYPE_STOCK') IN (:types)
       ORDER BY l.score DESC LIMIT 50
     """)
-    suspend fun topScoresFor(segments:List<String>):List<LiveScoreEntity>
+    suspend fun topScoresFor(segments:List<String>,types:List<String>):List<LiveScoreEntity>
 
     @Query("""
       SELECT e.* FROM queue_events e
       INNER JOIN symbols s ON s.insCode=e.insCode
-      WHERE e.status='CANDIDATE' AND s.segment IN (:segments)
+      WHERE e.status='CANDIDATE'
+        AND s.segment IN (:segments)
+        AND s.instrumentType IN (:types)
       ORDER BY e.date DESC LIMIT :limit
     """)
-    suspend fun candidateEventsFor(segments:List<String>,limit:Int):List<QueueEventEntity>
+    suspend fun candidateEventsFor(segments:List<String>,types:List<String>,limit:Int):List<QueueEventEntity>
+
+    @Query("""
+      SELECT COUNT(*) FROM queue_events e
+      INNER JOIN symbols s ON s.insCode=e.insCode
+      WHERE e.status='CANDIDATE'
+        AND s.segment IN (:segments)
+        AND s.instrumentType IN (:types)
+    """)
+    suspend fun candidateCountFor(segments:List<String>,types:List<String>):Int
 
     @Query("SELECT * FROM daily WHERE insCode=:insCode AND date=:date LIMIT 1")
     suspend fun dailyFor(insCode:String,date:Int):DailyEntity?
@@ -147,10 +163,16 @@ interface BorsaDao {
              e.score AS score,e.status AS status
       FROM queue_events e
       INNER JOIN symbols s ON s.insCode=e.insCode
-      WHERE e.status='QUEUE_CONFIRMED' AND s.segment IN (:segments)
+      WHERE e.status='QUEUE_CONFIRMED'
+        AND s.segment IN (:segments)
+        AND s.instrumentType IN (:types)
       ORDER BY e.date DESC,e.score DESC LIMIT :limit
     """)
-    suspend fun confirmedHistoryFor(segments:List<String>,limit:Int=1000):List<QueueHistoryRow>
+    suspend fun confirmedHistoryFor(
+        segments:List<String>,
+        types:List<String>,
+        limit:Int=1000
+    ):List<QueueHistoryRow>
 
     @Query("SELECT * FROM paper_trades WHERE status='OPEN' AND insCode=:insCode LIMIT 1")
     suspend fun openPaperTrade(insCode:String):PaperTradeEntity?
@@ -178,6 +200,6 @@ interface BorsaDao {
         SymbolEntity::class,DailyEntity::class,QueueEventEntity::class,
         LiveScoreEntity::class,PaperTradeEntity::class
     ],
-    version=4,exportSchema=false
+    version=5,exportSchema=false
 )
 abstract class AppDatabase:RoomDatabase(){ abstract fun dao():BorsaDao }

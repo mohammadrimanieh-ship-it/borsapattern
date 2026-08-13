@@ -8,14 +8,17 @@ import java.util.concurrent.TimeUnit
 
 class TsetmcClient {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private fun get(url: String): String {
         val req = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mozilla/5.0 Android BorsaPattern/0.2")
+            .header("User-Agent", "Mozilla/5.0 Android BorsaPattern/1.1")
             .header("Referer", "https://tsetmc.com/")
             .build()
         client.newCall(req).execute().use { r ->

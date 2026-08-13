@@ -45,7 +45,8 @@ object SymbolResolver {
             name=name,
             flow=f,
             segment=MarketPrefs.classify(f,b),
-            boardTitle=b
+            boardTitle=b,
+            instrumentType=MarketPrefs.classifyType(symbol,name,f,b)
         )
         dao.upsertSymbols(listOf(entity))
         return entity

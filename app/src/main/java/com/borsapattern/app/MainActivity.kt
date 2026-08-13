@@ -81,7 +81,8 @@ class MainActivity:ComponentActivity(){
 
         LaunchedEffect(Unit){
             while(true){
-                val segs=MarketPrefs.selected(this@MainActivity).toList()
+                val segs=MarketPrefs.selectedSegments(this@MainActivity).toList()
+                val types=MarketPrefs.selectedTypes(this@MainActivity).toList()
                 symbols=app.db.dao().symbolCount()
                 records=app.db.dao().dailyCount()
                 candidates=app.db.dao().candidateCount()
@@ -89,8 +90,8 @@ class MainActivity:ComponentActivity(){
                 rejected=app.db.dao().rejectedCount()
                 errors=app.db.dao().errorCount()
                 latest=app.db.dao().latestMarketDate()
-                scores=app.db.dao().topScoresFor(segs)
-                history=app.db.dao().confirmedHistoryFor(segs)
+                scores=app.db.dao().topScoresFor(segs,types)
+                history=app.db.dao().confirmedHistoryFor(segs,types)
                 trades=app.db.dao().recentPaperTrades(100)
 
                 syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
@@ -168,9 +169,13 @@ class MainActivity:ComponentActivity(){
 
         if(showMarkets){
             MarketDialog(
-                initial=MarketPrefs.selected(this),
+                initialTypes=MarketPrefs.selectedTypes(this),
+                initialSegments=MarketPrefs.selectedSegments(this),
                 onDismiss={showMarkets=false},
-                onSave={MarketPrefs.save(this,it);showMarkets=false}
+                onSave={types,segments->
+                    MarketPrefs.saveFilters(this,types,segments)
+                    showMarkets=false
+                }
             )
         }
     }
@@ -345,7 +350,7 @@ class MainActivity:ComponentActivity(){
             contentPadding=PaddingValues(vertical=10.dp)
         ){
             item{
-                Button(onClick=onMarkets,modifier=Modifier.fillMaxWidth()){Text("انتخاب بورس / فرابورس / بازار پایه")}
+                Button(onClick=onMarkets,modifier=Modifier.fillMaxWidth()){Text("نوع اوراق و بازارهای مورد بررسی")}
             }
             item{
                 FilledTonalButton(onClick=onNames,modifier=Modifier.fillMaxWidth()){Text("ترمیم دوباره نام نمادها")}
@@ -431,31 +436,97 @@ class MainActivity:ComponentActivity(){
         }
     }
 
+
     @Composable
-    private fun MarketDialog(initial:Set<String>,onDismiss:()->Unit,onSave:(Set<String>)->Unit){
-        var selected by remember{mutableStateOf(initial)}
+    private fun MarketDialog(
+        initialTypes:Set<String>,
+        initialSegments:Set<String>,
+        onDismiss:()->Unit,
+        onSave:(Set<String>,Set<String>)->Unit
+    ){
+        var selectedTypes by remember{mutableStateOf(initialTypes)}
+        var selectedSegments by remember{mutableStateOf(initialSegments)}
+
+        val rows=listOf(
+            listOf(MarketPrefs.TYPE_STOCK,MarketPrefs.TYPE_BASE),
+            listOf(MarketPrefs.TYPE_HOUSING,MarketPrefs.TYPE_RIGHT),
+            listOf(MarketPrefs.TYPE_BOND,MarketPrefs.TYPE_OPTION),
+            listOf(MarketPrefs.TYPE_FUTURE,MarketPrefs.TYPE_FUND),
+            listOf(MarketPrefs.TYPE_COMMODITY,MarketPrefs.TYPE_TAL),
+            listOf(MarketPrefs.TYPE_ENERGY)
+        )
+
         AlertDialog(
             onDismissRequest=onDismiss,
-            title={Text("بازارهای مورد بررسی")},
+            title={Text("نوع اوراق")},
             text={
-                Column{
-                    MarketPrefs.all.forEach{s->
-                        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
-                            Checkbox(
-                                checked=selected.contains(s),
-                                onCheckedChange={on->selected=if(on) selected+s else selected-s}
-                            )
-                            Text(MarketPrefs.label(s))
+                Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+                    rows.forEach{row->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement=Arrangement.spacedBy(6.dp)
+                        ){
+                            row.forEach{type->
+                                FilterChip(
+                                    selected=selectedTypes.contains(type),
+                                    onClick={
+                                        selectedTypes=
+                                            if(selectedTypes.contains(type)) selectedTypes-type
+                                            else selectedTypes+type
+                                    },
+                                    label={Text(MarketPrefs.typeLabel(type),fontSize=11.sp)},
+                                    modifier=Modifier.weight(1f)
+                                )
+                            }
+                            if(row.size==1) Spacer(Modifier.weight(1f))
                         }
                     }
+
+                    if(selectedTypes.contains(MarketPrefs.TYPE_BASE)){
+                        HorizontalDivider()
+                        Text("جزئیات بازار پایه",fontWeight=FontWeight.Bold,fontSize=12.sp)
+
+                        listOf(
+                            MarketPrefs.BASE_YELLOW,
+                            MarketPrefs.BASE_ORANGE,
+                            MarketPrefs.BASE_RED
+                        ).forEach{seg->
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment=Alignment.CenterVertically
+                            ){
+                                Checkbox(
+                                    checked=selectedSegments.contains(seg),
+                                    onCheckedChange={on->
+                                        selectedSegments=
+                                            if(on) selectedSegments+seg
+                                            else selectedSegments-seg
+                                    }
+                                )
+                                Text(MarketPrefs.label(seg))
+                            }
+                        }
+                    }
+
+                    Text(
+                        "این فیلتر روی دریافت داده، تحلیل تاریخی، اسکن زنده و Paper Trading اعمال می‌شود.",
+                        fontSize=10.sp,
+                        color=Color.Gray
+                    )
                 }
             },
             confirmButton={
-                TextButton(onClick={if(selected.isNotEmpty()) onSave(selected) else onDismiss()}){
-                    Text("ذخیره")
-                }
+                TextButton(
+                    onClick={
+                        if(selectedTypes.isNotEmpty()){
+                            onSave(selectedTypes,selectedSegments)
+                        }
+                    }
+                ){Text("ذخیره")}
             },
-            dismissButton={TextButton(onClick=onDismiss){Text("انصراف")}}
+            dismissButton={
+                TextButton(onClick=onDismiss){Text("انصراف")}
+            }
         )
     }
 
@@ -467,7 +538,7 @@ class MainActivity:ComponentActivity(){
     private fun startAnalyze(){
         val req=OneTimeWorkRequestBuilder<QueueAnalysisWorker>()
             .setConstraints(HistoricalWorker.networkConstraint())
-            .setInputData(workDataOf("batchSize" to 240,"parallelism" to 4))
+            .setInputData(workDataOf("batchSize" to 120,"parallelism" to 4))
             .build()
         WorkManager.getInstance(this).enqueueUniqueWork(
             QueueAnalysisWorker.ANALYSIS_CHAIN,ExistingWorkPolicy.REPLACE,req

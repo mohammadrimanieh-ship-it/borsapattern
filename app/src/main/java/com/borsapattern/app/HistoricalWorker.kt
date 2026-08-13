@@ -37,15 +37,27 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                         symbol=cleanSymbol(rawSymbol,ins),
                         name=rawName?.trim(),
                         flow=firstInt(o,"flow"),
-                        segment=MarketPrefs.classify(firstInt(o,"flow"),firstString(o,"cgrValCotTitle","boardTitle")),
-                        boardTitle=firstString(o,"cgrValCotTitle","boardTitle")
+                        segment=MarketPrefs.classify(
+                            firstInt(o,"flow"),
+                            firstString(o,"cgrValCotTitle","boardTitle")
+                        ),
+                        boardTitle=firstString(o,"cgrValCotTitle","boardTitle"),
+                        instrumentType=MarketPrefs.classifyType(
+                            cleanSymbol(rawSymbol,ins),
+                            rawName?.trim(),
+                            firstInt(o,"flow"),
+                            firstString(o,"cgrValCotTitle","boardTitle")
+                        )
                     )
                 }
                 if(fresh.isNotEmpty()) dao.upsertSymbols(fresh)
             }
 
-            val wanted=MarketPrefs.selected(applicationContext)
-            val symbols=dao.allSymbols().filter{ wanted.contains(it.segment) }
+            val wantedSegments=MarketPrefs.selectedSegments(applicationContext)
+            val wantedTypes=MarketPrefs.selectedTypes(applicationContext)
+            val symbols=dao.allSymbols().filter{
+                wantedSegments.contains(it.segment) && wantedTypes.contains(it.instrumentType)
+            }
             if(symbols.isEmpty()){
                 prefs.edit()
                     .putString("sync_status","فهرست نمادها دریافت نشد؛ بعداً دوباره تلاش می‌شود")

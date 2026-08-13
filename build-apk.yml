@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Signed Android APK
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,15 +32,25 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
+      - name: Verify signing secrets
+        env:
+          KS: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 }}
+          SP: ${{ secrets.BORSAPATTERN_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.BORSAPATTERN_KEY_ALIAS }}
+          KP: ${{ secrets.BORSAPATTERN_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS" ] || [ -z "$SP" ] || [ -z "$KA" ] || [ -z "$KP" ]; then
+            echo "::error::Signing secrets are missing. Add the four BORSAPATTERN_* secrets before building."
+            exit 1
+          fi
+
       - name: Restore stable signing key
-        if: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 != '' }}
         env:
           KEYSTORE_B64: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 }}
         run: |
           echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/borsapattern-release.jks"
 
-      - name: Build stable release APK
-        if: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 != '' }}
+      - name: Build signed release APK
         env:
           BORSAPATTERN_KEYSTORE_PATH: ${{ runner.temp }}/borsapattern-release.jks
           BORSAPATTERN_KEYSTORE_PASSWORD: ${{ secrets.BORSAPATTERN_KEYSTORE_PASSWORD }}
@@ -47,22 +58,9 @@ jobs:
           BORSAPATTERN_KEY_PASSWORD: ${{ secrets.BORSAPATTERN_KEY_PASSWORD }}
         run: gradle :app:assembleRelease --stacktrace
 
-      - name: Build debug APK fallback
-        if: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 == '' }}
-        run: gradle :app:assembleDebug --stacktrace
-
-      - name: Upload stable release APK
-        if: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 != '' }}
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: BorsaPattern-v10-release-apk
+          name: BorsaPattern-v1.1-signed
           path: app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-
-      - name: Upload debug APK fallback
-        if: ${{ secrets.BORSAPATTERN_KEYSTORE_BASE64 == '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: BorsaPattern-v10-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
