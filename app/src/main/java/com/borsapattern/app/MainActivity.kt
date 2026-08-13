@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.work.*
@@ -39,12 +41,12 @@ class MainActivity:ComponentActivity(){
     private fun AppTheme(content: @Composable () -> Unit){
         MaterialTheme(
             colorScheme=lightColorScheme(
-                primary=Color(0xFF5B3FB2),
-                secondary=Color(0xFF8B6BDD),
-                background=Color(0xFFF8F4FF),
+                primary=Color(0xFF5C35C8),
+                secondary=Color(0xFF16B8A6),
+                background=Color(0xFFF7F8FC),
                 surface=Color.White,
-                primaryContainer=Color(0xFFE9E0FF),
-                secondaryContainer=Color(0xFFF0EAFF)
+                primaryContainer=Color(0xFFEFE8FF),
+                secondaryContainer=Color(0xFFE7F7F4)
             ),
             content=content
         )
@@ -155,45 +157,107 @@ class MainActivity:ComponentActivity(){
         Scaffold(
             containerColor=MaterialTheme.colorScheme.background,
             topBar={
-                Surface(shadowElevation=4.dp){
-                    Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=12.dp)){
-                        Text("Signal",fontSize=30.sp,fontWeight=FontWeight.Black)
+                Surface(
+                    color=Color.White,
+                    shadowElevation=2.dp
+                ){
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .padding(horizontal=18.dp,vertical=10.dp)
+                    ){
+                        Box(Modifier.fillMaxWidth()){
+                            Text(
+                                "Signal",
+                                modifier=Modifier.align(Alignment.Center),
+                                fontSize=28.sp,
+                                fontWeight=FontWeight.Black,
+                                color=Color(0xFF161827)
+                            )
+                            Text(
+                                "◯",
+                                modifier=Modifier.align(Alignment.CenterStart),
+                                fontSize=22.sp,
+                                color=Color(0xFF202232)
+                            )
+                        }
                         Row(
                             Modifier.fillMaxWidth(),
-                            horizontalArrangement=Arrangement.SpaceBetween,
+                            horizontalArrangement=Arrangement.Center,
                             verticalAlignment=Alignment.CenterVertically
                         ){
                             Text(
-                                "رصد بازار • الگو • تکنیکال • Paper Trading",
+                                "سیگنال هوشمند بورس",
                                 color=MaterialTheme.colorScheme.primary,
-                                fontSize=13.sp
-                            )
-                            Text(
-                                "v1.4.1-test",
-                                color=Color.Gray,
-                                fontSize=11.sp,
+                                fontSize=12.sp,
                                 fontWeight=FontWeight.Bold
                             )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "v1.5-test",
+                                color=Color(0xFF666978),
+                                fontSize=10.sp
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        ScrollableTabRow(
+                            selectedTabIndex=section,
+                            edgePadding=0.dp,
+                            containerColor=Color.Transparent,
+                            contentColor=MaterialTheme.colorScheme.primary,
+                            divider={}
+                        ){
+                            Tab(section==0,{section=0},text={Text("سیگنال امروز",fontSize=12.sp)})
+                            Tab(section==3,{section=3},text={Text("استخراج داده",fontSize=12.sp)})
+                            Tab(section==1,{section=1},text={Text("بک‌تست روزانه",fontSize=12.sp)})
+                            Tab(section==4,{section=4},text={Text("پیپر تریدینگ",fontSize=12.sp)})
+                            Tab(section==2,{section=2},text={Text("جستجو",fontSize=12.sp)})
                         }
                     }
                 }
+            },
+            bottomBar={
+                NavigationBar(
+                    containerColor=Color.White,
+                    tonalElevation=4.dp
+                ){
+                    NavigationBarItem(
+                        selected=section==0,
+                        onClick={section=0},
+                        icon={Text("↗",fontSize=20.sp)},
+                        label={Text("سیگنال امروز",fontSize=9.sp)}
+                    )
+                    NavigationBarItem(
+                        selected=section==3,
+                        onClick={section=3},
+                        icon={Text("▱",fontSize=20.sp)},
+                        label={Text("استخراج داده",fontSize=9.sp)}
+                    )
+                    NavigationBarItem(
+                        selected=section==1,
+                        onClick={section=1},
+                        icon={Text("□",fontSize=20.sp)},
+                        label={Text("بک‌تست",fontSize=9.sp)}
+                    )
+                    NavigationBarItem(
+                        selected=section==4,
+                        onClick={section=4},
+                        icon={Text("◒",fontSize=20.sp)},
+                        label={Text("پیپر",fontSize=9.sp)}
+                    )
+                    NavigationBarItem(
+                        selected=section==2,
+                        onClick={section=2},
+                        icon={Text("⌕",fontSize=20.sp)},
+                        label={Text("جستجو",fontSize=9.sp)}
+                    )
+                }
             }
         ){padding->
-            Column(
-                Modifier.fillMaxSize().padding(padding).padding(horizontal=12.dp)
+            Box(
+                Modifier.fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal=12.dp)
             ){
-                ScrollableTabRow(
-                    selectedTabIndex=section,
-                    edgePadding=0.dp,
-                    containerColor=Color.Transparent
-                ){
-                    Tab(section==0,{section=0},text={Text("سیگنال امروز")})
-                    Tab(section==1,{section=1},text={Text("بک‌تست روزانه")})
-                    Tab(section==2,{section=2},text={Text("جستجو 🔎")})
-                    Tab(section==3,{section=3},text={Text("استخراج داده")})
-                    Tab(section==4,{section=4},text={Text("آزمایشی")})
-                }
-
                 when(section){
                     0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
                     1 -> DailyBacktest(history)
@@ -238,59 +302,245 @@ class MainActivity:ComponentActivity(){
         onLiveToggle:(Boolean)->Unit,
         lastLiveScan:Long?
     ){
+        var filter by remember{mutableIntStateOf(0)}
+        val all=scores.sortedByDescending{it.score}
+        val visible=when(filter){
+            1 -> all.filter{it.score>=80}
+            2 -> all.filter{it.score in 65.0..79.999}
+            3 -> all.filter{it.score<65}
+            else -> all
+        }
+        val avg=if(all.isEmpty()) 0 else all.map{it.score}.average().toInt()
+
         LazyColumn(
             Modifier.fillMaxSize(),
             verticalArrangement=Arrangement.spacedBy(10.dp),
-            contentPadding=PaddingValues(vertical=10.dp)
+            contentPadding=PaddingValues(top=12.dp,bottom=14.dp)
         ){
             item{
-                Card(
-                    shape=RoundedCornerShape(22.dp),
-                    colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement=Arrangement.spacedBy(8.dp)
                 ){
-                    Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
-                        Text("سیگنال‌های امروز",fontSize=22.sp,fontWeight=FontWeight.Black)
-                        Text("فقط خروجی نهایی موتور سیگنال نمایش داده می‌شود.",fontSize=12.sp)
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement=Arrangement.SpaceBetween,
-                            verticalAlignment=Alignment.CenterVertically
-                        ){
-                            Text(if(liveEnabled)"رصد زنده فعال است" else "رصد زنده خاموش است")
-                            Switch(checked=liveEnabled,onCheckedChange=onLiveToggle)
+                    SummaryTile(
+                        title="تعداد سیگنال‌ها",
+                        value=fa(all.size),
+                        bg=Color(0xFFE8F7F3),
+                        modifier=Modifier.weight(1f)
+                    )
+                    SummaryTile(
+                        title="میانگین امتیاز",
+                        value=fa(avg),
+                        bg=Color(0xFFEAF2FF),
+                        modifier=Modifier.weight(1f)
+                    )
+                    SummaryTile(
+                        title="آخرین بروزرسانی",
+                        value=if(lastLiveScan!=null) clock(lastLiveScan) else "—",
+                        bg=Color(0xFFF1E9FF),
+                        modifier=Modifier.weight(1f)
+                    )
+                }
+            }
+
+            item{
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement=Arrangement.spacedBy(6.dp),
+                    verticalAlignment=Alignment.CenterVertically
+                ){
+                    SignalFilterChip(filter==0,{filter=0},"همه (${fa(all.size)})")
+                    SignalFilterChip(filter==1,{filter=1},"قوی (${fa(all.count{it.score>=80})})")
+                    SignalFilterChip(filter==2,{filter=2},"متوسط (${fa(all.count{it.score in 65.0..79.999})})")
+                    SignalFilterChip(filter==3,{filter=3},"ضعیف (${fa(all.count{it.score<65})})")
+                }
+            }
+
+            item{
+                Card(
+                    shape=RoundedCornerShape(18.dp),
+                    colors=CardDefaults.cardColors(containerColor=Color(0xFFF9FAFD)),
+                    border=BorderStroke(1.dp,Color(0xFFE5E7EF))
+                ){
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=10.dp),
+                        horizontalArrangement=Arrangement.SpaceBetween,
+                        verticalAlignment=Alignment.CenterVertically
+                    ){
+                        Column{
+                            Text(
+                                "اسکن بر اساس داده‌های زنده بازار از ساعت 09:00 به بعد",
+                                fontSize=11.sp,
+                                color=Color(0xFF6F7280)
+                            )
+                            Text(
+                                if(liveEnabled) "رصد زنده فعال" else "رصد زنده خاموش",
+                                fontSize=11.sp,
+                                fontWeight=FontWeight.Bold,
+                                color=if(liveEnabled) Color(0xFF168D68) else Color(0xFF8B8D98)
+                            )
                         }
-                        if(lastLiveScan!=null) Text("آخرین اسکن: ${clock(lastLiveScan)}",fontSize=11.sp)
+                        Switch(checked=liveEnabled,onCheckedChange=onLiveToggle)
                     }
                 }
             }
-            val strong=scores.filter{it.score>=60}.sortedByDescending{it.score}
-            if(strong.isEmpty()){
-                item{Empty("فعلاً سیگنال روزانه قابل نمایش نیست")}
-            }else{
-                items(strong){s->
-                    Card(shape=RoundedCornerShape(18.dp)){
-                        Row(
-                            Modifier.fillMaxWidth().padding(14.dp),
-                            horizontalArrangement=Arrangement.SpaceBetween,
-                            verticalAlignment=Alignment.CenterVertically
-                        ){
-                            Column(Modifier.weight(1f)){
-                                Text(s.symbol?:"در حال تکمیل نام",fontSize=19.sp,fontWeight=FontWeight.Bold)
-                                Text(
-                                    when{
-                                        s.score>=85 -> "سیگنال قوی"
-                                        s.score>=70 -> "سیگنال"
-                                        else -> "تحت نظر"
-                                    },
-                                    color=MaterialTheme.colorScheme.primary,
-                                    fontWeight=FontWeight.Bold
-                                )
-                                Text("آخرین قیمت: ${Jalali.digits(String.format(Locale.US,"%.0f",s.lastPrice))}",fontSize=11.sp)
-                            }
-                            ScoreBadge(s.score)
-                        }
+
+            if(visible.isEmpty()){
+                item{
+                    Card(
+                        shape=RoundedCornerShape(20.dp),
+                        colors=CardDefaults.cardColors(containerColor=Color.White)
+                    ){
+                        Text(
+                            "فعلاً سیگنالی در این فیلتر وجود ندارد.",
+                            Modifier.fillMaxWidth().padding(22.dp),
+                            textAlign=TextAlign.Center,
+                            color=Color(0xFF777A87)
+                        )
                     }
                 }
+            }else{
+                items(visible){s->
+                    SignalCard(s)
+                }
+            }
+
+            item{
+                Text(
+                    "این اطلاعات صرفاً جهت تحلیل بوده و تایید قطعی خرید یا فروش نیست.",
+                    modifier=Modifier.fillMaxWidth().padding(vertical=8.dp),
+                    textAlign=TextAlign.Center,
+                    fontSize=10.sp,
+                    color=Color(0xFF8C8E98)
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun SummaryTile(
+        title:String,
+        value:String,
+        bg:Color,
+        modifier:Modifier=Modifier
+    ){
+        Card(
+            modifier=modifier.height(116.dp),
+            shape=RoundedCornerShape(18.dp),
+            colors=CardDefaults.cardColors(containerColor=bg)
+        ){
+            Column(
+                Modifier.fillMaxSize().padding(10.dp),
+                horizontalAlignment=Alignment.CenterHorizontally,
+                verticalArrangement=Arrangement.Center
+            ){
+                Text(title,fontSize=10.sp,color=Color(0xFF555968),textAlign=TextAlign.Center)
+                Spacer(Modifier.height(7.dp))
+                Text(value,fontSize=22.sp,fontWeight=FontWeight.Black,color=Color(0xFF171927))
+            }
+        }
+    }
+
+    @Composable
+    private fun SignalFilterChip(
+        selected:Boolean,
+        onClick:()->Unit,
+        text:String
+    ){
+        FilterChip(
+            selected=selected,
+            onClick=onClick,
+            label={Text(text,fontSize=10.sp)},
+            colors=FilterChipDefaults.filterChipColors(
+                selectedContainerColor=MaterialTheme.colorScheme.primary,
+                selectedLabelColor=Color.White,
+                containerColor=Color.White
+            ),
+            border=FilterChipDefaults.filterChipBorder(
+                enabled=true,
+                selected=selected,
+                borderColor=Color(0xFFE1E3EA),
+                selectedBorderColor=MaterialTheme.colorScheme.primary
+            )
+        )
+    }
+
+    @Composable
+    private fun SignalCard(s:LiveScoreEntity){
+        val score=s.score.toInt()
+        val strong=score>=80
+        val medium=score>=65
+        val badge=when{
+            strong -> Color(0xFFDFF5E8)
+            medium -> Color(0xFFFFF0D9)
+            else -> Color(0xFFF2E8E8)
+        }
+        val badgeText=when{
+            strong -> Color(0xFF118658)
+            medium -> Color(0xFFD67A00)
+            else -> Color(0xFFA85A5A)
+        }
+
+        Card(
+            modifier=Modifier.fillMaxWidth(),
+            shape=RoundedCornerShape(20.dp),
+            colors=CardDefaults.cardColors(containerColor=Color.White),
+            border=BorderStroke(1.dp,Color(0xFFE4E6ED))
+        ){
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=13.dp),
+                verticalAlignment=Alignment.CenterVertically
+            ){
+                Column(Modifier.weight(1.2f)){
+                    Text(
+                        s.symbol?:"در حال تکمیل نام",
+                        fontSize=17.sp,
+                        fontWeight=FontWeight.Black,
+                        color=Color(0xFF1C1E29)
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        when{
+                            strong -> "سیگنال قوی"
+                            medium -> "سیگنال متوسط"
+                            else -> "تحت نظر"
+                        },
+                        fontSize=10.sp,
+                        color=Color(0xFF777A86)
+                    )
+                }
+
+                Column(
+                    Modifier.weight(.8f),
+                    horizontalAlignment=Alignment.CenterHorizontally
+                ){
+                    Surface(
+                        shape=RoundedCornerShape(10.dp),
+                        color=badge
+                    ){
+                        Text(
+                            fa(score),
+                            Modifier.padding(horizontal=10.dp,vertical=5.dp),
+                            color=badgeText,
+                            fontWeight=FontWeight.Bold
+                        )
+                    }
+                    Text("امتیاز",fontSize=9.sp,color=Color.Gray)
+                }
+
+                Column(
+                    Modifier.weight(.9f),
+                    horizontalAlignment=Alignment.CenterHorizontally
+                ){
+                    Text(clock(s.updatedAt),fontSize=13.sp,fontWeight=FontWeight.Bold)
+                    Text("زمان سیگنال",fontSize=9.sp,color=Color.Gray)
+                }
+
+                Text(
+                    if(strong)"▲" else if(medium)"●" else "•",
+                    color=if(strong) Color(0xFF159A63) else if(medium) Color(0xFFE28B14) else Color(0xFF9A9CA6),
+                    fontSize=15.sp
+                )
             }
         }
     }
