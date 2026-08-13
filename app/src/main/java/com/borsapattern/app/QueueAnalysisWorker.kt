@@ -12,7 +12,17 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
     private val prefs get()=applicationContext.getSharedPreferences("analysis",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result=coroutineScope{
-        PatternEngine.seedInitialEvents((applicationContext as BorsaApp).db)
+        val modelVersion=prefs.getInt("analysis_model_version",0)
+        if(modelVersion<3){
+            prefs.edit()
+                .putBoolean("analysis_running",true)
+                .putString("analysis_status","بازسازی مدل صف معتبر و حذف بازگشایی‌های ویژه")
+                .apply()
+            PatternEngine.rebuildCandidates((applicationContext as BorsaApp).db)
+            prefs.edit().putInt("analysis_model_version",3).apply()
+        }else{
+            PatternEngine.seedInitialEvents((applicationContext as BorsaApp).db)
+        }
         if(inputData.getBoolean("resetErrors",false)) dao.retryErrors()
 
         val segments=MarketPrefs.selectedSegments(applicationContext).toList()
@@ -85,6 +95,19 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
                 next
             )
+        }else{
+            prefs.edit()
+                .putString("analysis_status","تحلیل صف‌ها کامل شد؛ بررسی خودکار روز معاملاتی بعد شروع شد")
+                .apply()
+
+            val nextDay=OneTimeWorkRequestBuilder<NextDayQueueWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                NextDayQueueWorker.CHAIN,
+                ExistingWorkPolicy.REPLACE,
+                nextDay
+            )
         }
 
         Result.success()
@@ -92,9 +115,23 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
     private suspend fun analyzeOne(e:QueueEventEntity){
         try{
-            val dayHigh=dao.dailyFor(e.insCode,e.date)?.high ?: 0.0
+            if(PatternEngine.isLikelySpecialReopen(dao,e.insCode,e.date)){
+                dao.upsertEvents(
+                    listOf(
+                        e.copy(
+                            status="SPECIAL_REOPEN",
+                            score=0.0,
+                            eventTime=null,
+                            signalTime=null,
+                            queueValue=null,
+                            nextDayQueueStatus="SKIPPED_SPECIAL_REOPEN"
+                        )
+                    )
+                )
+                return
+            }
 
-            // OkHttp itself has a call timeout too; this coroutine timeout is an extra guard.
+            val dayHigh=dao.dailyFor(e.insCode,e.date)?.high ?: 0.0
             val arr=withTimeout(16_000L){
                 api.jsonArrayFrom(
                     api.bestLimitsRaw(e.insCode,e.date),
@@ -108,14 +145,11 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 return
             }
 
-            var bidPrice:Double?=null
-            var bidVolume:Double?=null
-            var askVolume:Double?=null
-            var bestTime:Int?=null
-            var firstSignalTime:Int?=null
+            var firstQueueTime:Int?=null
+            var lastQueueTime:Int?=null
             var bestValue=0.0
             var bestImbalance=0.0
-            var atHighSeen=false
+            var queueSamples=0
 
             for(i in 0 until arr.length()){
                 val o=arr.optJSONObject(i)?:continue
@@ -123,55 +157,56 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 if(rowTime==null || rowTime !in 90000..123000) continue
                 if((firstInt(o,"number","level")?:1)!=1) continue
 
-                firstDouble(o,"pMeDem","bidPrice")?.let{bidPrice=it}
-                firstDouble(o,"qTitMeDem","bidVolume")?.let{bidVolume=it}
-                firstDouble(o,"qTitMeOf","askVolume")?.let{askVolume=it}
+                val bp=firstDouble(o,"pMeDem","bidPrice") ?: continue
+                val bv=firstDouble(o,"qTitMeDem","bidVolume") ?: 0.0
+                val av=firstDouble(o,"qTitMeOf","askVolume") ?: 0.0
+                if(bv<=0) continue
 
-                val bp=bidPrice?:continue
-                val bv=bidVolume?:0.0
-                val av=askVolume?:0.0
                 val qv=bp*bv
                 val imbalance=if(bv+av>0) bv/(bv+av) else 0.0
                 val atHigh=dayHigh>0 && bp>=dayHigh*0.9995
-                val nowTime=rowTime ?: firstInt(o,"hEven","time")
-                if(firstSignalTime==null && atHigh && qv>=20_000_000_000.0 && imbalance>=0.65){
-                    firstSignalTime=nowTime
-                }
+                val realQueue=atHigh && (av<=0.0 || imbalance>=0.92)
 
-                if(atHigh && qv>bestValue){
-                    bestValue=qv
-                    bestTime=nowTime
-                    bestImbalance=imbalance
-                    atHighSeen=true
+                if(realQueue){
+                    queueSamples++
+                    if(firstQueueTime==null || rowTime<firstQueueTime!!) firstQueueTime=rowTime
+                    if(lastQueueTime==null || rowTime>lastQueueTime!!) lastQueueTime=rowTime
+                    if(qv>bestValue) bestValue=qv
+                    if(imbalance>bestImbalance) bestImbalance=imbalance
                 }
             }
 
-            val confirmed=
-                atHighSeen &&
-                bestValue>=50_000_000_000.0 &&
-                bestImbalance>=0.80
+            val confirmed=queueSamples>0 && firstQueueTime!=null
+            val durationMinutes=if(confirmed && lastQueueTime!=null){
+                val f=firstQueueTime!!
+                val l=lastQueueTime!!
+                val fm=(f/10000)*60 + (f/100)%100
+                val lm=(l/10000)*60 + (l/100)%100
+                (lm-fm).coerceAtLeast(0)
+            }else 0
+
+            val valueComponent=
+                (bestValue/250_000_000_000.0*18.0).coerceIn(0.0,18.0)
+            val durationComponent=(durationMinutes/90.0*12.0).coerceIn(0.0,12.0)
+            val imbalanceComponent=(bestImbalance*20.0).coerceIn(0.0,20.0)
 
             val score=if(confirmed){
-                (
-                    70 +
-                    20*bestImbalance +
-                    minOf(9.0,bestValue/500_000_000_000.0*10)
-                ).coerceAtMost(99.0)
+                (50.0+valueComponent+durationComponent+imbalanceComponent)
+                    .coerceIn(50.0,99.0)
             }else e.score
 
             dao.upsertEvents(
                 listOf(
                     e.copy(
-                        eventTime=bestTime,
-                        queueValue=bestValue,
+                        eventTime=firstQueueTime,
+                        queueValue=bestValue.takeIf{confirmed},
                         score=score,
-                        signalTime=firstSignalTime,
+                        signalTime=firstQueueTime,
                         status=if(confirmed)"QUEUE_CONFIRMED" else "NOT_QUEUE"
                     )
                 )
             )
         }catch(_:Exception){
-            // Do not leave a candidate stuck forever.
             dao.upsertEvents(listOf(e.copy(status="ERROR")))
         }
     }

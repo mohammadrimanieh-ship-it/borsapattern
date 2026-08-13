@@ -1,36 +1,145 @@
 package com.borsapattern.app
 
+import kotlin.math.max
+import kotlin.math.min
+
 object PatternEngine {
-    suspend fun seedInitialEvents(db:AppDatabase) {
+    private const val MODEL_VERSION=3
+
+    suspend fun rebuildCandidates(db:AppDatabase) {
         val sql=db.openHelper.writableDatabase
+        sql.execSQL("DELETE FROM queue_events")
+
         val c=sql.query("""
           SELECT d.insCode,d.date,d.high,d.yesterday,d.volume,d.value
-          FROM daily d LEFT JOIN queue_events e ON e.insCode=d.insCode AND e.date=d.date
-          WHERE d.yesterday>0 AND d.volume>0 AND e.insCode IS NULL
+          FROM daily d
+          INNER JOIN symbols s ON s.insCode=d.insCode
+          WHERE d.yesterday>0 AND d.volume>0
+            AND s.segment IN ('BOURSE','FARABOURSE','BASE_YELLOW','BASE_ORANGE','BASE_RED')
+            AND (
+              s.instrumentType IN ('TYPE_STOCK','TYPE_BASE')
+              OR (
+                s.instrumentType='TYPE_FUND' AND
+                (COALESCE(s.symbol,'') LIKE '%اهرم%' OR COALESCE(s.name,'') LIKE '%اهرم%')
+              )
+            )
+          ORDER BY d.insCode ASC,d.date ASC
         """.trimIndent())
+
         val events=mutableListOf<QueueEventEntity>()
+        var currentIns:String?=null
+        val recentPositive=ArrayDeque<Double>()
+
         c.use {
             while(it.moveToNext()){
-                val ins=it.getString(0); val date=it.getInt(1)
+                val ins=it.getString(0)
+                val date=it.getInt(1)
                 val high=if(it.isNull(2)) null else it.getDouble(2)
                 val y=if(it.isNull(3)) null else it.getDouble(3)
                 val vol=if(it.isNull(4)) 0.0 else it.getDouble(4)
                 val value=if(it.isNull(5)) 0.0 else it.getDouble(5)
-                if(high!=null && y!=null && y>0){
-                    val rise=high/y-1.0
-                    // مرحله اول فقط روزهایی را نگه می‌دارد که به محدوده مثبت قوی رسیده‌اند و معامله معنادار داشته‌اند.
-                    if(rise>=0.035 && vol>0 && value>0){
-                        val score=(55.0 + rise*400.0).coerceIn(55.0,78.0)
-                        events += QueueEventEntity(ins,date,null,null,score,"CANDIDATE")
-                    }
+
+                if(currentIns!=ins){
+                    currentIns=ins
+                    recentPositive.clear()
                 }
+
+                if(high==null || y==null || y<=0 || vol<=0 || value<=0) continue
+                val rise=high/y-1.0
+                if(rise<=0) continue
+
+                val special=isLikelySpecialRise(rise,recentPositive.toList())
+
+                if(special){
+                    events += QueueEventEntity(
+                        insCode=ins,
+                        date=date,
+                        eventTime=null,
+                        queueValue=null,
+                        score=0.0,
+                        status="SPECIAL_REOPEN",
+                        signalTime=null,
+                        nextTradingDate=null,
+                        nextDayQueueStatus="SKIPPED_SPECIAL_REOPEN"
+                    )
+                }else if(rise>=0.015){
+                    // Candidate only. Best-limits history decides whether a real queue existed.
+                    val seed=(48.0 + min(22.0,rise*450.0)).coerceIn(48.0,70.0)
+                    events += QueueEventEntity(
+                        insCode=ins,date=date,eventTime=null,queueValue=null,
+                        score=seed,status="CANDIDATE"
+                    )
+                }
+
+                recentPositive.addLast(rise)
+                while(recentPositive.size>40) recentPositive.removeFirst()
             }
         }
+
         if(events.isNotEmpty()) db.dao().upsertEvents(events)
     }
 
-    fun scoreLive(priceMomentum:Double,volumeAccel:Double,bidAskImbalance:Double,supplyDrop:Double):Double {
-        val z=.30*priceMomentum.coerceIn(0.0,1.0)+.25*volumeAccel.coerceIn(0.0,1.0)+.30*bidAskImbalance.coerceIn(0.0,1.0)+.15*supplyDrop.coerceIn(0.0,1.0)
+    suspend fun seedInitialEvents(db:AppDatabase) {
+        val sql=db.openHelper.writableDatabase
+        val c=sql.query("SELECT COUNT(*) FROM queue_events")
+        val count=c.use{ if(it.moveToFirst()) it.getInt(0) else 0 }
+        if(count==0) rebuildCandidates(db)
+    }
+
+    suspend fun isLikelySpecialReopen(
+        dao:BorsaDao,
+        insCode:String,
+        date:Int
+    ):Boolean{
+        val day=dao.dailyFor(insCode,date) ?: return false
+        val high=day.high ?: return false
+        val y=day.yesterday ?: return false
+        if(y<=0) return false
+        val rise=high/y-1.0
+        if(rise<=0.055) return false
+
+        val history=dao.recentDailyBefore(insCode,date,45)
+            .mapNotNull{d->
+                val h=d.high
+                val py=d.yesterday
+                if(h!=null && py!=null && py>0){
+                    (h/py-1.0).takeIf{it>0}
+                }else null
+            }
+        return isLikelySpecialRise(rise,history)
+    }
+
+    private fun isLikelySpecialRise(
+        rise:Double,
+        previousPositive:List<Double>
+    ):Boolean{
+        if(rise>=0.12) return true
+        if(rise<=0.055) return false
+
+        val clean=previousPositive
+            .filter{it>0 && it<0.12}
+            .sorted()
+
+        val p90=if(clean.size>=8){
+            clean[((clean.size-1)*0.90).toInt()]
+        }else 0.04
+
+        // Adaptive: normal ranges that were historically wider get a wider tolerance.
+        val threshold=max(0.055,min(0.10,p90*1.55))
+        return rise>threshold
+    }
+
+    fun scoreLive(
+        priceMomentum:Double,
+        volumeAccel:Double,
+        bidAskImbalance:Double,
+        supplyDrop:Double
+    ):Double {
+        val z=
+            .30*priceMomentum.coerceIn(0.0,1.0)+
+            .25*volumeAccel.coerceIn(0.0,1.0)+
+            .30*bidAskImbalance.coerceIn(0.0,1.0)+
+            .15*supplyDrop.coerceIn(0.0,1.0)
         return (z*100.0).coerceIn(0.0,100.0)
     }
 }

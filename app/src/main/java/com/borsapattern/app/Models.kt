@@ -182,6 +182,23 @@ interface BorsaDao {
     @Query("SELECT * FROM daily WHERE insCode=:insCode AND date=:date LIMIT 1")
     suspend fun dailyFor(insCode:String,date:Int):DailyEntity?
 
+    @Query("""
+      SELECT * FROM daily
+      WHERE insCode=:insCode AND date<:date
+      ORDER BY date DESC LIMIT :limit
+    """)
+    suspend fun recentDailyBefore(insCode:String,date:Int,limit:Int=45):List<DailyEntity>
+
+
+    @Query("SELECT COUNT(*) FROM queue_events WHERE status='SPECIAL_REOPEN'")
+    suspend fun specialReopenCount():Int
+
+    @Query("""
+      SELECT COUNT(*) FROM queue_events
+      WHERE status='QUEUE_CONFIRMED' AND nextDayQueueStatus='QUEUE_AGAIN'
+    """)
+    suspend fun twoDayQueueCount():Int
+
     @Query("UPDATE queue_events SET status='CANDIDATE' WHERE status='ERROR'")
     suspend fun retryErrors()
 

@@ -65,6 +65,7 @@ class MainActivity:ComponentActivity(){
         val metaPrefs=remember{getSharedPreferences("metadata",Context.MODE_PRIVATE)}
         val nextPrefs=remember{getSharedPreferences("nextday",Context.MODE_PRIVATE)}
         val catalogPrefs=remember{getSharedPreferences("catalog",Context.MODE_PRIVATE)}
+        val queueLearningPrefs=remember{getSharedPreferences("queue_learning",Context.MODE_PRIVATE)}
 
         var symbols by remember{mutableStateOf(0)}
         var records by remember{mutableStateOf(0)}
@@ -105,6 +106,17 @@ class MainActivity:ComponentActivity(){
         var catalogUnknown by remember{mutableStateOf(0)}
         var catalogExcluded by remember{mutableStateOf(0)}
 
+        var specialReopenCount by remember{mutableStateOf(0)}
+        var twoDayQueueCount by remember{mutableStateOf(0)}
+        var learnedKnown by remember{mutableStateOf(0)}
+        var learnedSuccess by remember{mutableStateOf(0)}
+        var learnedRate by remember{mutableStateOf(0f)}
+        var learnedBestBucket by remember{mutableStateOf("داده کافی نیست")}
+        var learnedBestBucketRate by remember{mutableStateOf(0f)}
+        var learnedMedianTime by remember{mutableStateOf(0)}
+        var learnedMedianQueueValue by remember{mutableStateOf(0L)}
+        var learnedAvgScore by remember{mutableStateOf(0f)}
+
         LaunchedEffect(Unit){
             while(true){
                 val segs=MarketPrefs.selectedSegments(this@MainActivity).toList()
@@ -135,8 +147,19 @@ class MainActivity:ComponentActivity(){
                 errors=app.db.dao().errorCount()
                 latest=app.db.dao().latestMarketDate()
                 scores=app.db.dao().topSignalScores()
-                history=app.db.dao().confirmedHistoryFor(segs,types)
+                history=app.db.dao().confirmedHistoryFor(segs,types,5000)
                 trades=app.db.dao().recentPaperTrades(100)
+                specialReopenCount=app.db.dao().specialReopenCount()
+                twoDayQueueCount=app.db.dao().twoDayQueueCount()
+
+                learnedKnown=queueLearningPrefs.getInt("total_known",0)
+                learnedSuccess=queueLearningPrefs.getInt("success_count",0)
+                learnedRate=queueLearningPrefs.getFloat("success_rate",0f)
+                learnedBestBucket=queueLearningPrefs.getString("best_bucket","داده کافی نیست")?:"داده کافی نیست"
+                learnedBestBucketRate=queueLearningPrefs.getFloat("best_bucket_rate",0f)
+                learnedMedianTime=queueLearningPrefs.getInt("median_success_time",0)
+                learnedMedianQueueValue=queueLearningPrefs.getLong("median_success_queue_value",0L)
+                learnedAvgScore=queueLearningPrefs.getFloat("avg_success_score",0f)
 
                 syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
                 syncDone=syncPrefs.getInt("sync_done",0)
@@ -225,7 +248,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.2.1-test",
+                                    "Signal • v2.3-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -297,7 +320,19 @@ class MainActivity:ComponentActivity(){
                 ){
                     when(section){
                         0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
-                        1 -> DailyBacktest(history)
+                        1 -> DailyBacktest(
+                            history=history,
+                            specialReopenCount=specialReopenCount,
+                            twoDayQueueCount=twoDayQueueCount,
+                            learnedKnown=learnedKnown,
+                            learnedSuccess=learnedSuccess,
+                            learnedRate=learnedRate,
+                            bestBucket=learnedBestBucket,
+                            bestBucketRate=learnedBestBucketRate,
+                            medianSuccessTime=learnedMedianTime,
+                            medianSuccessQueueValue=learnedMedianQueueValue,
+                            avgSuccessScore=learnedAvgScore
+                        )
                         2 -> SymbolSearchPage(
                             searchText,{searchText=it},searchResults,
                             selectedSymbol,selectedSignals,selectedStats,
@@ -427,7 +462,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.2.1-test",
+                        "v2.3-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -743,8 +778,23 @@ class MainActivity:ComponentActivity(){
     }
 
     @Composable
-    private fun DailyBacktest(history:List<QueueHistoryRow>){
-        val grouped=history.groupBy{it.date}.toSortedMap(compareByDescending{it})
+    private fun DailyBacktest(
+        history:List<QueueHistoryRow>,
+        specialReopenCount:Int,
+        twoDayQueueCount:Int,
+        learnedKnown:Int,
+        learnedSuccess:Int,
+        learnedRate:Float,
+        bestBucket:String,
+        bestBucketRate:Float,
+        medianSuccessTime:Int,
+        medianSuccessQueueValue:Long,
+        avgSuccessScore:Float
+    ){
+        var onlyTwoDay by remember{mutableStateOf(true)}
+        val twoDay=history.filter{it.nextDayQueueStatus=="QUEUE_AGAIN"}
+        val visible=if(onlyTwoDay) twoDay else history
+        val grouped=visible.groupBy{it.date}.toSortedMap(compareByDescending{it})
 
         LazyColumn(
             verticalArrangement=Arrangement.spacedBy(12.dp),
@@ -752,14 +802,135 @@ class MainActivity:ComponentActivity(){
         ){
             item{
                 PageHero(
-                    eyebrow="BACKTEST",
-                    title="بک‌تست روزانه",
-                    subtitle="نتیجه واقعی سیگنال‌های تاریخی، روز به روز"
+                    eyebrow="QUEUE PATTERN",
+                    title="الگوی صف خرید دو روزه",
+                    subtitle="فقط صف‌های واقعی 09:00 تا 12:30؛ بازگشایی‌های بدون دامنه حذف شده‌اند"
                 )
             }
 
+            item{
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement=Arrangement.spacedBy(8.dp)
+                ){
+                    SummaryTile(
+                        title="صف دو روزه",
+                        value=fa(twoDayQueueCount),
+                        bg=Color(0xFFE5F7EC),
+                        modifier=Modifier.weight(1f)
+                    )
+                    SummaryTile(
+                        title="نمونه نتیجه‌دار",
+                        value=fa(learnedKnown),
+                        bg=Color(0xFFEAF2FF),
+                        modifier=Modifier.weight(1f)
+                    )
+                    SummaryTile(
+                        title="ماندگاری روز بعد",
+                        value=if(learnedKnown>0)
+                            "${fa((learnedRate*100).toInt())}٪"
+                        else "—",
+                        bg=Color(0xFFF2ECFF),
+                        modifier=Modifier.weight(1f)
+                    )
+                }
+            }
+
+            item{
+                PolishedCard{
+                    Text("الگوی استخراج‌شده",fontSize=17.sp,fontWeight=FontWeight.Black)
+                    Text(
+                        if(learnedKnown>=10)
+                            "بر اساس ${fa(learnedKnown)} صف خرید معتبر که نتیجه روز معاملاتی بعدشان مشخص شده است."
+                        else
+                            "هنوز نمونه کافی برای الگوی قابل اتکا جمع نشده است.",
+                        fontSize=11.sp,
+                        color=Color(0xFF737684)
+                    )
+                    Spacer(Modifier.height(6.dp))
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(7.dp)
+                    ){
+                        MetricPill(
+                            "بهترین بازه",
+                            bestBucket,
+                            Modifier.weight(1f)
+                        )
+                        MetricPill(
+                            "موفقیت بازه",
+                            if(bestBucketRate>0f) "${fa((bestBucketRate*100).toInt())}٪" else "—",
+                            Modifier.weight(1f)
+                        )
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(7.dp)
+                    ){
+                        MetricPill(
+                            "میانه شروع صف",
+                            if(medianSuccessTime>0) fmtTime(medianSuccessTime) else "—",
+                            Modifier.weight(1f)
+                        )
+                        MetricPill(
+                            "میانه ارزش صف",
+                            if(medianSuccessQueueValue>0)
+                                "${fa((medianSuccessQueueValue/1_000_000_000L).toInt())} میلیارد"
+                            else "—",
+                            Modifier.weight(1f)
+                        )
+                        MetricPill(
+                            "میانگین امتیاز",
+                            if(avgSuccessScore>0f) fa(avgSuccessScore.toInt()) else "—",
+                            Modifier.weight(1f)
+                        )
+                    }
+
+                    Surface(
+                        color=Color(0xFFFFF6E3),
+                        shape=RoundedCornerShape(13.dp)
+                    ){
+                        Text(
+                            "${fa(specialReopenCount)} رخداد بازگشایی ویژه/بدون دامنه از مدل اصلی کنار گذاشته شده‌اند.",
+                            Modifier.fillMaxWidth().padding(10.dp),
+                            fontSize=10.sp,
+                            color=Color(0xFF7B6415)
+                        )
+                    }
+                }
+            }
+
+            item{
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement=Arrangement.spacedBy(8.dp)
+                ){
+                    FilterChip(
+                        selected=onlyTwoDay,
+                        onClick={onlyTwoDay=true},
+                        label={Text("فقط صف دو روزه (${fa(twoDay.size)})")},
+                        modifier=Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected=!onlyTwoDay,
+                        onClick={onlyTwoDay=false},
+                        label={Text("همه صف‌های معتبر (${fa(history.size)})")},
+                        modifier=Modifier.weight(1f)
+                    )
+                }
+            }
+
             if(grouped.isEmpty()){
-                item{ PolishedEmpty("هنوز نتیجه بک‌تست روزانه ثبت نشده است.") }
+                item{
+                    PolishedEmpty(
+                        if(onlyTwoDay)
+                            "هنوز سهمی با صف خرید معتبر در روز جاری و روز معاملاتی بعد پیدا نشده است."
+                        else
+                            "هنوز نتیجه تحلیل صف‌های معتبر ثبت نشده است."
+                    )
+                }
             }else{
                 grouped.forEach{(date,rows)->
                     item{
@@ -780,17 +951,16 @@ class MainActivity:ComponentActivity(){
                                     Text(
                                         Jalali.fromGregorianInt(date),
                                         fontSize=18.sp,
-                                        fontWeight=FontWeight.Black,
-                                        color=Color(0xFF171927)
+                                        fontWeight=FontWeight.Black
                                     )
                                     Surface(
-                                        color=Color(0xFFF0EBFF),
+                                        color=if(onlyTwoDay) Color(0xFFE4F6EA) else Color(0xFFF0EBFF),
                                         shape=RoundedCornerShape(12.dp)
                                     ){
                                         Text(
-                                            "${fa(rows.size)} سیگنال",
+                                            "${fa(rows.size)} نماد",
                                             Modifier.padding(horizontal=10.dp,vertical=5.dp),
-                                            color=MaterialTheme.colorScheme.primary,
+                                            color=if(onlyTwoDay) Color(0xFF118658) else MaterialTheme.colorScheme.primary,
                                             fontSize=11.sp,
                                             fontWeight=FontWeight.Bold
                                         )
@@ -804,7 +974,7 @@ class MainActivity:ComponentActivity(){
                                     ){
                                         Column(
                                             Modifier.fillMaxWidth().padding(12.dp),
-                                            verticalArrangement=Arrangement.spacedBy(4.dp)
+                                            verticalArrangement=Arrangement.spacedBy(5.dp)
                                         ){
                                             Row(
                                                 Modifier.fillMaxWidth(),
@@ -812,7 +982,7 @@ class MainActivity:ComponentActivity(){
                                             ){
                                                 Text(
                                                     s.symbol?:"در حال تکمیل نام",
-                                                    fontWeight=FontWeight.Bold,
+                                                    fontWeight=FontWeight.Black,
                                                     fontSize=16.sp
                                                 )
                                                 Text(
@@ -822,14 +992,19 @@ class MainActivity:ComponentActivity(){
                                                 )
                                             }
                                             Text(
-                                                "هشدار ${fmtTime(s.signalTime)}  •  صف ${fmtTime(s.eventTime)}",
+                                                "شروع صف: ${fmtTime(s.signalTime)}  •  ارزش بیشینه صف: ${
+                                                    if((s.queueValue?:0.0)>0)
+                                                        fa(((s.queueValue?:0.0)/1_000_000_000.0).toInt())+" میلیارد"
+                                                    else "—"
+                                                }",
                                                 fontSize=11.sp,
                                                 color=Color(0xFF727583)
                                             )
                                             Text(
                                                 when(s.nextDayQueueStatus){
-                                                    "QUEUE_AGAIN" -> "روز بعد هم صف خرید ماند ✓"
-                                                    "NOT_QUEUE_NEXT_DAY" -> "روز بعد صف خرید نماند"
+                                                    "QUEUE_AGAIN" -> "روز معاملاتی بعد هم صف خرید شد ✓"
+                                                    "NOT_QUEUE_NEXT_DAY" -> "روز معاملاتی بعد صف خرید نشد"
+                                                    "NEXT_DAY_SPECIAL_REOPEN" -> "روز بعد بازگشایی ویژه بود؛ از الگو حذف شد"
                                                     "NO_NEXT_DAY" -> "داده روز معاملاتی بعد موجود نیست"
                                                     else -> "روز بعد هنوز بررسی نشده"
                                                 },
@@ -837,6 +1012,7 @@ class MainActivity:ComponentActivity(){
                                                 color=when(s.nextDayQueueStatus){
                                                     "QUEUE_AGAIN" -> Color(0xFF118658)
                                                     "NOT_QUEUE_NEXT_DAY" -> Color(0xFFB85A5A)
+                                                    "NEXT_DAY_SPECIAL_REOPEN" -> Color(0xFFD08B00)
                                                     else -> Color(0xFF777A87)
                                                 }
                                             )

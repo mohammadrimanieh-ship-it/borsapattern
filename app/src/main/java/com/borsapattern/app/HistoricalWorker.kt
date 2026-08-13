@@ -200,8 +200,22 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 .putInt("sync_done",total)
                 .putInt("sync_total",total)
                 .putBoolean("sync_running",false)
-                .putString("sync_status","همگام‌سازی تاریخچه کامل شد")
+                .putString("sync_status","تاریخچه کامل شد؛ تحلیل صف‌های معتبر شروع شد")
                 .apply()
+
+            val analysis=OneTimeWorkRequestBuilder<QueueAnalysisWorker>()
+                .setConstraints(networkConstraint())
+                .setInputData(workDataOf(
+                    "batchSize" to 160,
+                    "parallelism" to 4,
+                    "resetErrors" to true
+                ))
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                QueueAnalysisWorker.ANALYSIS_CHAIN,
+                ExistingWorkPolicy.REPLACE,
+                analysis
+            )
 
             Result.success()
         }catch(e:Exception){
