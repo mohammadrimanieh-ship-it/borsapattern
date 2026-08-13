@@ -48,10 +48,10 @@ class BorsaApp:Application(){
         val now=System.currentTimeMillis()
         val lastCatalog=catalogPrefs.getLong("last_refresh",0L)
         val appState=getSharedPreferences("app_state",MODE_PRIVATE)
-        val forceV22=!appState.getBoolean("v22_catalog_rebuild_done",false)
+        val forceV24=!appState.getBoolean("v24_symbol_update_done",false)
 
-        if(forceV22 || now-lastCatalog > 12L*60L*60L*1000L){
-            if(forceV22){
+        if(forceV24 || now-lastCatalog > 12L*60L*60L*1000L){
+            if(forceV24){
                 catalogPrefs.edit()
                     .remove("eligible_count")
                     .remove("raw_count")
@@ -70,12 +70,24 @@ class BorsaApp:Application(){
                 .build()
             WorkManager.getInstance(this).enqueueUniqueWork(
                 SymbolCatalogWorker.CHAIN,
-                if(forceV22) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                if(forceV24) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
                 catalogReq
             )
-            if(forceV22){
-                appState.edit().putBoolean("v22_catalog_rebuild_done",true).apply()
+            if(forceV24){
+                appState.edit().putBoolean("v24_symbol_update_done",true).apply()
             }
+        }
+
+        if(catalogPrefs.getInt("unknown_count",0)>0){
+            val resumeMetadata=OneTimeWorkRequestBuilder<MetadataWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInputData(workDataOf("batch" to 60))
+                .build()
+            WorkManager.getInstance(this).enqueueUniqueWork(
+                MetadataWorker.CHAIN,
+                ExistingWorkPolicy.KEEP,
+                resumeMetadata
+            )
         }
 
         scheduleBackgroundWork()

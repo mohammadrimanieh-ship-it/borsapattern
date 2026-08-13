@@ -107,7 +107,9 @@ class MainActivity:ComponentActivity(){
         var catalogExcluded by remember{mutableStateOf(0)}
 
         var specialReopenCount by remember{mutableStateOf(0)}
+        var preopenDay1Excluded by remember{mutableStateOf(0)}
         var twoDayQueueCount by remember{mutableStateOf(0)}
+        var strongPreopenNextDay by remember{mutableStateOf(0)}
         var learnedKnown by remember{mutableStateOf(0)}
         var learnedSuccess by remember{mutableStateOf(0)}
         var learnedRate by remember{mutableStateOf(0f)}
@@ -150,7 +152,9 @@ class MainActivity:ComponentActivity(){
                 history=app.db.dao().confirmedHistoryFor(segs,types,5000)
                 trades=app.db.dao().recentPaperTrades(100)
                 specialReopenCount=app.db.dao().specialReopenCount()
+                preopenDay1Excluded=app.db.dao().preopenDay1ExcludedCount()
                 twoDayQueueCount=app.db.dao().twoDayQueueCount()
+                strongPreopenNextDay=app.db.dao().strongPreopenNextDayCount()
 
                 learnedKnown=queueLearningPrefs.getInt("total_known",0)
                 learnedSuccess=queueLearningPrefs.getInt("success_count",0)
@@ -248,7 +252,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.3-test",
+                                    "Signal • v2.4-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -323,7 +327,9 @@ class MainActivity:ComponentActivity(){
                         1 -> DailyBacktest(
                             history=history,
                             specialReopenCount=specialReopenCount,
+                            preopenDay1Excluded=preopenDay1Excluded,
                             twoDayQueueCount=twoDayQueueCount,
+                            strongPreopenNextDay=strongPreopenNextDay,
                             learnedKnown=learnedKnown,
                             learnedSuccess=learnedSuccess,
                             learnedRate=learnedRate,
@@ -344,10 +350,9 @@ class MainActivity:ComponentActivity(){
                             syncStatus,syncDone,syncTotal,
                             metadataStatus,catalogStatus,
                             onMarkets={showMarkets=true},
-                            onNames={startNameRepair()},
-                            onCatalog={refreshSymbolCatalog()},
-                            onStart={symbolsText,years->
-                                saveExtractionSelection(symbolsText,years)
+                            onSymbolsUpdate={refreshSymbolCatalog()},
+                            onStart={years->
+                                saveExtractionSelection(years)
                                 startUpdate()
                             },
                             onAnalyze={startAnalyze()},
@@ -356,7 +361,7 @@ class MainActivity:ComponentActivity(){
                         4 -> PaperTrades(trades)
                         else -> SettingsPage(
                             onMarkets={showMarkets=true},
-                            onNames={startNameRepair()},
+                            onSymbolsUpdate={refreshSymbolCatalog()},
                             onUpdate={startUpdate()}
                         )
                     }
@@ -462,7 +467,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.3-test",
+                        "v2.4-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -781,7 +786,9 @@ class MainActivity:ComponentActivity(){
     private fun DailyBacktest(
         history:List<QueueHistoryRow>,
         specialReopenCount:Int,
+        preopenDay1Excluded:Int,
         twoDayQueueCount:Int,
+        strongPreopenNextDay:Int,
         learnedKnown:Int,
         learnedSuccess:Int,
         learnedRate:Float,
@@ -792,7 +799,10 @@ class MainActivity:ComponentActivity(){
         avgSuccessScore:Float
     ){
         var onlyTwoDay by remember{mutableStateOf(true)}
-        val twoDay=history.filter{it.nextDayQueueStatus=="QUEUE_AGAIN"}
+        val twoDay=history.filter{
+            it.nextDayQueueStatus=="QUEUE_AGAIN" ||
+            it.nextDayQueueStatus=="PREOPEN_QUEUE_NEXT_DAY"
+        }
         val visible=if(onlyTwoDay) twoDay else history
         val grouped=visible.groupBy{it.date}.toSortedMap(compareByDescending{it})
 
@@ -903,6 +913,24 @@ class MainActivity:ComponentActivity(){
             }
 
             item{
+                PolishedCard{
+                    Text("پاکسازی مدل",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    Text(
+                        "${fa(preopenDay1Excluded)} روز به‌خاطر صف قبل از ۹ در روز سیگنال حذف شده‌اند.",
+                        fontSize=11.sp,color=Color(0xFF747785)
+                    )
+                    Text(
+                        "${fa(specialReopenCount)} بازگشایی ویژه/بدون دامنه نیز از مدل اصلی حذف شده‌اند.",
+                        fontSize=11.sp,color=Color(0xFF747785)
+                    )
+                    Text(
+                        "${fa(strongPreopenNextDay)} موفقیت خیلی قوی: سهم روز بعد از پیش‌گشایش صف خرید بوده است.",
+                        fontSize=11.sp,color=Color(0xFF118658),fontWeight=FontWeight.Bold
+                    )
+                }
+            }
+
+            item{
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement=Arrangement.spacedBy(8.dp)
@@ -1002,7 +1030,8 @@ class MainActivity:ComponentActivity(){
                                             )
                                             Text(
                                                 when(s.nextDayQueueStatus){
-                                                    "QUEUE_AGAIN" -> "روز معاملاتی بعد هم صف خرید شد ✓"
+                                                    "PREOPEN_QUEUE_NEXT_DAY" -> "روز بعد از پیش‌گشایش صف خرید بود ★ موفقیت خیلی قوی"
+                                                    "QUEUE_AGAIN" -> "روز معاملاتی بعد در تایم عادی صف خرید شد ✓"
                                                     "NOT_QUEUE_NEXT_DAY" -> "روز معاملاتی بعد صف خرید نشد"
                                                     "NEXT_DAY_SPECIAL_REOPEN" -> "روز بعد بازگشایی ویژه بود؛ از الگو حذف شد"
                                                     "NO_NEXT_DAY" -> "داده روز معاملاتی بعد موجود نیست"
@@ -1010,6 +1039,7 @@ class MainActivity:ComponentActivity(){
                                                 },
                                                 fontSize=11.sp,
                                                 color=when(s.nextDayQueueStatus){
+                                                    "PREOPEN_QUEUE_NEXT_DAY" -> Color(0xFF087A53)
                                                     "QUEUE_AGAIN" -> Color(0xFF118658)
                                                     "NOT_QUEUE_NEXT_DAY" -> Color(0xFFB85A5A)
                                                     "NEXT_DAY_SPECIAL_REOPEN" -> Color(0xFFD08B00)
@@ -1034,10 +1064,9 @@ class MainActivity:ComponentActivity(){
         leveragedCount:Int,unknownCount:Int,excludedCount:Int,
         syncStatus:String,syncDone:Int,syncTotal:Int,metadataStatus:String,
         catalogStatus:String,
-        onMarkets:()->Unit,onNames:()->Unit,onCatalog:()->Unit,
-        onStart:(String,Int)->Unit,onAnalyze:()->Unit,onNextDay:()->Unit
+        onMarkets:()->Unit,onSymbolsUpdate:()->Unit,
+        onStart:(Int)->Unit,onAnalyze:()->Unit,onNextDay:()->Unit
     ){
-        var symbolsText by remember{mutableStateOf("")}
         var years by remember{mutableIntStateOf(5)}
         var showConfirm by remember{mutableStateOf(false)}
 
@@ -1063,12 +1092,15 @@ class MainActivity:ComponentActivity(){
                         Column(Modifier.weight(1f)){
                             Text("فهرست نمادها",fontWeight=FontWeight.Black)
                             Text(catalogStatus,fontSize=11.sp,color=Color(0xFF747785))
+                            if(metadataStatus!="آماده"){
+                                Text(metadataStatus,fontSize=10.sp,color=MaterialTheme.colorScheme.primary)
+                            }
                             Text(
                                 "خام ${fa(rawCount)} • حذف‌شده ${fa(excludedCount)}",
                                 fontSize=10.sp,color=Color(0xFF91939D)
                             )
                         }
-                        TextButton(onClick=onCatalog){Text("بازسازی فهرست")}
+                        TextButton(onClick=onSymbolsUpdate){Text("به‌روزرسانی نمادها")}
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(
@@ -1143,28 +1175,7 @@ class MainActivity:ComponentActivity(){
 
             item{
                 PolishedCard{
-                    Text("۲. نمادهای خاص",fontSize=15.sp,fontWeight=FontWeight.Black)
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value=symbolsText,
-                        onValueChange={symbolsText=it},
-                        modifier=Modifier.fillMaxWidth(),
-                        shape=RoundedCornerShape(16.dp),
-                        singleLine=false,
-                        minLines=2,
-                        label={Text("اختیاری")},
-                        placeholder={Text("مثال: وبملت، خودرو، شستا")}
-                    )
-                    Text(
-                        "اگر خالی باشد، همه نمادهای Universe انتخاب‌شده استخراج می‌شوند.",
-                        fontSize=10.sp,color=Color(0xFF858894)
-                    )
-                }
-            }
-
-            item{
-                PolishedCard{
-                    Text("۳. بازه تاریخی",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    Text("۲. بازه تاریخی",fontSize=15.sp,fontWeight=FontWeight.Black)
                     Spacer(Modifier.height(8.dp))
                     Row(
                         Modifier.fillMaxWidth(),
@@ -1207,28 +1218,6 @@ class MainActivity:ComponentActivity(){
             }
 
             item{
-                PolishedCard{
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement=Arrangement.SpaceBetween,
-                        verticalAlignment=Alignment.CenterVertically
-                    ){
-                        Column(Modifier.weight(1f)){
-                            Text("نام نمادها",fontWeight=FontWeight.Bold)
-                            Text(metadataStatus,fontSize=11.sp,color=Color(0xFF747785))
-                        }
-                        TextButton(onClick=onNames){
-                            Text("بررسی ناقص‌ها")
-                        }
-                    }
-                    Text(
-                        "نام‌های موجود دوباره دانلود نمی‌شوند؛ فقط نمادهای جدید یا رکوردهای ناقص ترمیم می‌شوند.",
-                        fontSize=10.sp,color=Color(0xFF8B8D98)
-                    )
-                }
-            }
-
-            item{
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement=Arrangement.spacedBy(8.dp)
@@ -1257,12 +1246,6 @@ class MainActivity:ComponentActivity(){
                         Text("Universe فعلی: ${fa(eligibleCount)} نماد")
                         Text("بازه: ${fa(years)} سال")
                         Text(
-                            if(symbolsText.isBlank())
-                                "نماد خاصی وارد نشده؛ همه Universe انتخاب‌شده بررسی می‌شود."
-                            else "نمادهای انتخابی: $symbolsText",
-                            fontSize=12.sp,color=Color(0xFF666977)
-                        )
-                        Text(
                             "تا زمانی که «تایید و شروع» را نزنی هیچ Worker استخراجی اجرا نمی‌شود.",
                             fontSize=11.sp,color=MaterialTheme.colorScheme.primary,
                             fontWeight=FontWeight.Bold
@@ -1272,7 +1255,7 @@ class MainActivity:ComponentActivity(){
                 confirmButton={
                     Button(onClick={
                         showConfirm=false
-                        onStart(symbolsText,years)
+                        onStart(years)
                     }){Text("تایید و شروع")}
                 },
                 dismissButton={
@@ -1673,7 +1656,7 @@ class MainActivity:ComponentActivity(){
     }
 
     @Composable
-    private fun SettingsPage(onMarkets:()->Unit,onNames:()->Unit,onUpdate:()->Unit){
+    private fun SettingsPage(onMarkets:()->Unit,onSymbolsUpdate:()->Unit,onUpdate:()->Unit){
         LazyColumn(
             verticalArrangement=Arrangement.spacedBy(10.dp),
             contentPadding=PaddingValues(vertical=10.dp)
@@ -1682,7 +1665,9 @@ class MainActivity:ComponentActivity(){
                 Button(onClick=onMarkets,modifier=Modifier.fillMaxWidth()){Text("نوع اوراق و بازارهای مورد بررسی")}
             }
             item{
-                FilledTonalButton(onClick=onNames,modifier=Modifier.fillMaxWidth()){Text("ترمیم دوباره نام نمادها")}
+                FilledTonalButton(onClick=onSymbolsUpdate,modifier=Modifier.fillMaxWidth()){
+                    Text("به‌روزرسانی فهرست و نام نمادها")
+                }
             }
             item{
                 FilledTonalButton(onClick=onUpdate,modifier=Modifier.fillMaxWidth()){Text("همگام‌سازی داده‌های جدید")}
@@ -1976,7 +1961,7 @@ class MainActivity:ComponentActivity(){
     private fun refreshSymbolCatalog(){
         getSharedPreferences("catalog",Context.MODE_PRIVATE)
             .edit()
-            .putString("status","در حال بازسازی فهرست نمادها")
+            .putString("status","در حال به‌روزرسانی فهرست، نام و بازار نمادها")
             .apply()
         val req=OneTimeWorkRequestBuilder<SymbolCatalogWorker>()
             .setConstraints(HistoricalWorker.networkConstraint())
@@ -1988,16 +1973,10 @@ class MainActivity:ComponentActivity(){
         )
     }
 
-    private fun saveExtractionSelection(raw:String,years:Int){
-        val symbols=raw
-            .replace("،",",")
-            .split(",")
-            .map{it.trim()}
-            .filter{it.isNotEmpty()}
-            .toSet()
+    private fun saveExtractionSelection(years:Int){
         getSharedPreferences("extract",Context.MODE_PRIVATE)
             .edit()
-            .putStringSet("symbols",symbols)
+            .remove("symbols")
             .putInt("years",years.coerceIn(1,5))
             .apply()
     }

@@ -10,14 +10,23 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
     private val prefs get()=applicationContext.getSharedPreferences("catalog",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
+        val finalizeOnly=inputData.getBoolean("finalizeOnly",false)
         return try{
             prefs.edit()
                 .putBoolean("running",true)
-                .putString("status","در حال دریافت فهرست خام نمادها")
+                .putString(
+                    "status",
+                    if(finalizeOnly) "در حال ساخت Universe نهایی"
+                    else "در حال دریافت و تکمیل فهرست نمادها"
+                )
                 .apply()
 
-            val arr=api.jsonArrayFrom(api.marketWatchRaw(),"marketwatch","marketWatch")
-            if(arr.length()==0){
+            val arr=if(finalizeOnly)
+                org.json.JSONArray()
+            else
+                api.jsonArrayFrom(api.marketWatchRaw(),"marketwatch","marketWatch")
+
+            if(!finalizeOnly && arr.length()==0){
                 prefs.edit()
                     .putBoolean("running",false)
                     .putString("status","پاسخ MarketWatch خالی بود")
@@ -25,6 +34,7 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 return Result.success()
             }
 
+            if(!finalizeOnly){
             val existing=dao.allSymbols().associateBy{it.insCode}
             val fresh=ArrayList<SymbolEntity>(arr.length())
 
@@ -69,6 +79,7 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             }
 
             if(fresh.isNotEmpty()) dao.upsertSymbols(fresh)
+            }
             dao.repairLiveScoreNames()
 
             // مرحله ۲: روی دیتابیس ذخیره‌شده طبقه‌بندی کن.
@@ -128,17 +139,28 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .putInt("excluded_count",excluded)
                 .putString(
                     "status",
-                    if(unknownStockLike>0)
-                        "فهرست خام آماده شد؛ $eligible معتبر و $unknownStockLike نیازمند تکمیل نام/بازار"
+                    if(finalizeOnly && unknownStockLike>0)
+                        "به‌روزرسانی تمام شد: $eligible معتبر؛ $unknownStockLike نماد هنوز متادیتای کافی ندارند"
+                    else if(finalizeOnly)
+                        "به‌روزرسانی نمادها کامل شد: $eligible نماد معتبر"
+                    else if(unknownStockLike>0)
+                        "در حال تکمیل خودکار نام/بازار؛ $eligible نماد فعلاً معتبر"
                     else
-                        "فهرست آماده شد: $eligible نماد معتبر از ${all.size} رکورد"
+                        "فهرست اولیه آماده شد: $eligible نماد معتبر"
                 )
                 .apply()
 
-            if(unknownStockLike>0 || dao.unknownSymbols(1).isNotEmpty()){
+            if(!finalizeOnly && (unknownStockLike>0 || dao.symbolsNeedingMetadata(1).isNotEmpty())){
+                prefs.edit()
+                    .putString(
+                        "status",
+                        "فهرست خام آماده شد؛ تکمیل نام و بازار نمادها به‌صورت خودکار ادامه دارد"
+                    )
+                    .apply()
+
                 val enrich=androidx.work.OneTimeWorkRequestBuilder<MetadataWorker>()
                     .setConstraints(HistoricalWorker.networkConstraint())
-                    .setInputData(androidx.work.workDataOf("batch" to 50))
+                    .setInputData(androidx.work.workDataOf("batch" to 60))
                     .build()
                 androidx.work.WorkManager.getInstance(applicationContext)
                     .enqueueUniqueWork(

@@ -13,13 +13,13 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
     override suspend fun doWork():Result=coroutineScope{
         val modelVersion=prefs.getInt("analysis_model_version",0)
-        if(modelVersion<3){
+        if(modelVersion<4){
             prefs.edit()
                 .putBoolean("analysis_running",true)
                 .putString("analysis_status","بازسازی مدل صف معتبر و حذف بازگشایی‌های ویژه")
                 .apply()
             PatternEngine.rebuildCandidates((applicationContext as BorsaApp).db)
-            prefs.edit().putInt("analysis_model_version",3).apply()
+            prefs.edit().putInt("analysis_model_version",4).apply()
         }else{
             PatternEngine.seedInitialEvents((applicationContext as BorsaApp).db)
         }
@@ -150,6 +150,42 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             var bestValue=0.0
             var bestImbalance=0.0
             var queueSamples=0
+            var hadPreopenQueue=false
+
+            // Day 1 rule: if the symbol was already queued before 09:00,
+            // it is not a valid intraday-origin signal for our model.
+            for(i in 0 until arr.length()){
+                val o=arr.optJSONObject(i)?:continue
+                val rowTime=firstInt(o,"hEven","time") ?: continue
+                if(rowTime !in 84500..85959) continue
+                if((firstInt(o,"number","level")?:1)!=1) continue
+                val bp=firstDouble(o,"pMeDem","bidPrice") ?: continue
+                val bv=firstDouble(o,"qTitMeDem","bidVolume") ?: 0.0
+                val av=firstDouble(o,"qTitMeOf","askVolume") ?: 0.0
+                if(bv<=0) continue
+                val imbalance=if(bv+av>0) bv/(bv+av) else 0.0
+                val atHigh=dayHigh>0 && bp>=dayHigh*0.9995
+                if(atHigh && (av<=0.0 || imbalance>=0.92)){
+                    hadPreopenQueue=true
+                    break
+                }
+            }
+
+            if(hadPreopenQueue){
+                dao.upsertEvents(
+                    listOf(
+                        e.copy(
+                            status="PREOPEN_QUEUE",
+                            score=0.0,
+                            eventTime=null,
+                            signalTime=null,
+                            queueValue=null,
+                            nextDayQueueStatus="SKIPPED_PREOPEN_DAY1"
+                        )
+                    )
+                )
+                return
+            }
 
             for(i in 0 until arr.length()){
                 val o=arr.optJSONObject(i)?:continue

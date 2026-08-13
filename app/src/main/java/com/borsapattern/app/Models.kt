@@ -195,9 +195,20 @@ interface BorsaDao {
 
     @Query("""
       SELECT COUNT(*) FROM queue_events
-      WHERE status='QUEUE_CONFIRMED' AND nextDayQueueStatus='QUEUE_AGAIN'
+      WHERE status='QUEUE_CONFIRMED'
+        AND nextDayQueueStatus IN ('QUEUE_AGAIN','PREOPEN_QUEUE_NEXT_DAY')
     """)
     suspend fun twoDayQueueCount():Int
+
+    @Query("""
+      SELECT COUNT(*) FROM queue_events
+      WHERE status='QUEUE_CONFIRMED'
+        AND nextDayQueueStatus='PREOPEN_QUEUE_NEXT_DAY'
+    """)
+    suspend fun strongPreopenNextDayCount():Int
+
+    @Query("SELECT COUNT(*) FROM queue_events WHERE status='PREOPEN_QUEUE'")
+    suspend fun preopenDay1ExcludedCount():Int
 
     @Query("UPDATE queue_events SET status='CANDIDATE' WHERE status='ERROR'")
     suspend fun retryErrors()

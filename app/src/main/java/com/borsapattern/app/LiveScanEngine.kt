@@ -86,7 +86,11 @@ object LiveScanEngine {
             val actor=(pattern*0.45 + volume*0.35 + continuity*20.0).coerceIn(0.0,100.0)
 
             val nowCode=nowIran.hour*10000 + nowIran.minute*100 + nowIran.second
-            val learnedBoost=QueuePatternLearningEngine.liveTimeBoost(context,nowCode)
+            val learnedTimeBoost=QueuePatternLearningEngine.liveTimeBoost(context,nowCode)
+            val persistenceBoost=QueuePatternLearningEngine.advancedPersistenceBoost(
+                context,nowCode,pattern,tech.score,volume
+            )
+            val learnedBoost=(learnedTimeBoost+persistenceBoost).coerceIn(-10.0,10.0)
 
             val finalScore=(
                 pattern*0.40 +
@@ -99,7 +103,7 @@ object LiveScanEngine {
             val reason=
                 "الگو ${pattern.toInt()} • تکنیکال ${tech.score.toInt()} • حجم ${volume.toInt()} • رفتار ${actor.toInt()}" +
                 if(kotlin.math.abs(learnedBoost)>=0.5)
-                    " • ماندگاری ${if(learnedBoost>0) "+" else ""}${learnedBoost.toInt()}"
+                    " • الگوی ماندگاری ${if(learnedBoost>0) "+" else ""}${learnedBoost.toInt()}"
                 else ""
 
             out += LiveScoreEntity(

@@ -12,13 +12,17 @@ object QueuePatternLearningEngine {
           SELECT signalTime,queueValue,score,nextDayQueueStatus
           FROM queue_events
           WHERE status='QUEUE_CONFIRMED'
-            AND nextDayQueueStatus IN ('QUEUE_AGAIN','NOT_QUEUE_NEXT_DAY')
+            AND nextDayQueueStatus IN (
+              'PREOPEN_QUEUE_NEXT_DAY','QUEUE_AGAIN','NOT_QUEUE_NEXT_DAY'
+            )
             AND signalTime BETWEEN 90000 AND 123000
           ORDER BY date ASC
         """.trimIndent())
 
         var total=0
         var success=0
+        var strongSuccess=0
+        var weightedSuccess=0.0
         var earlyTotal=0
         var earlySuccess=0
         var midTotal=0
@@ -35,11 +39,14 @@ object QueuePatternLearningEngine {
                 val q=if(it.isNull(1)) 0.0 else it.getDouble(1)
                 val score=if(it.isNull(2)) 0.0 else it.getDouble(2)
                 val status=it.getString(3)
-                val ok=status=="QUEUE_AGAIN"
+                val strong=status=="PREOPEN_QUEUE_NEXT_DAY"
+                val ok=strong || status=="QUEUE_AGAIN"
 
                 total++
                 if(ok){
                     success++
+                    weightedSuccess += if(strong) 1.20 else 1.0
+                    if(strong) strongSuccess++
                     if(t>0) successTimes+=t
                     if(q>0) successValues+=q
                     successScores+=score
@@ -77,6 +84,9 @@ object QueuePatternLearningEngine {
         }
 
         val successRate=rate(success,total)
+        val weightedSuccessRate=
+            if(total>0) (weightedSuccess/total.toDouble()).coerceAtMost(1.0).toFloat()
+        val strongRate=rate(strongSuccess,total)
         val earlyRate=rate(earlySuccess,earlyTotal)
         val midRate=rate(midSuccess,midTotal)
         val lateRate=rate(lateSuccess,lateTotal)
@@ -91,7 +101,10 @@ object QueuePatternLearningEngine {
         prefs.edit()
             .putInt("total_known",total)
             .putInt("success_count",success)
+            .putInt("strong_success_count",strongSuccess)
+            .putFloat("strong_success_rate",strongRate)
             .putFloat("success_rate",successRate)
+            .putFloat("weighted_success_rate",weightedSuccessRate)
             .putInt("early_total",earlyTotal)
             .putFloat("early_rate",earlyRate)
             .putInt("mid_total",midTotal)
@@ -111,11 +124,47 @@ object QueuePatternLearningEngine {
             .apply()
     }
 
+    fun advancedPersistenceBoost(
+        context:Context,
+        time:Int,
+        patternScore:Double,
+        technicalScore:Double,
+        volumeScore:Double
+    ):Double{
+        val p=context.getSharedPreferences("queue_learning",Context.MODE_PRIVATE)
+        val n=p.getInt("total_known",0)
+        if(n<20) return 0.0
+
+        val sampleWeight=(n/120.0).coerceIn(0.25,1.0)
+        val success=p.getFloat("success_rate",0f).toDouble()
+        val strong=p.getFloat("strong_success_rate",0f).toDouble()
+        val avgSuccessScore=p.getFloat("avg_success_score",0f).toDouble()
+
+        val bucketRate=when{
+            time<100000 -> p.getFloat("early_rate",0f).toDouble()
+            time<113000 -> p.getFloat("mid_rate",0f).toDouble()
+            else -> p.getFloat("late_rate",0f).toDouble()
+        }
+
+        val historicalEdge=((bucketRate-success)*18.0).coerceIn(-6.0,6.0)
+        val quality=(patternScore*0.45 + technicalScore*0.25 + volumeScore*0.30)
+        val qualityEdge=if(avgSuccessScore>0)
+            ((quality-avgSuccessScore)/12.0).coerceIn(-3.5,3.5)
+        else 0.0
+        val strongEdge=((strong-0.15)*5.0).coerceIn(-1.5,2.5)
+
+        return ((historicalEdge+qualityEdge+strongEdge)*sampleWeight)
+            .coerceIn(-8.0,8.0)
+    }
+
     fun liveTimeBoost(context:Context,time:Int):Double{
         val p=context.getSharedPreferences("queue_learning",Context.MODE_PRIVATE)
         val n=p.getInt("total_known",0)
         if(n<20) return 0.0
-        val baseline=p.getFloat("success_rate",0f).toDouble()
+        val baseline=p.getFloat(
+            "weighted_success_rate",
+            p.getFloat("success_rate",0f)
+        ).toDouble()
         val bucket=when{
             time<100000 -> p.getFloat("early_rate",0f).toDouble()
             time<113000 -> p.getFloat("mid_rate",0f).toDouble()

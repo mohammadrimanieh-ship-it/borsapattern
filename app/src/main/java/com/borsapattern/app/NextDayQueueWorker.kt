@@ -55,28 +55,39 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 )
             }
             val high=next.high ?: 0.0
-            var ok=false
+            var preopenOk=false
+            var intradayOk=false
+
+            // Day 2 rule: preopen queue is the strongest confirmation.
             for(i in 0 until arr.length()){
                 val o=arr.optJSONObject(i)?:continue
-                val rowTime=firstInt(o,"hEven","time")
-                if(rowTime==null || rowTime !in 90000..123000) continue
+                val rowTime=firstInt(o,"hEven","time") ?: continue
                 if((firstInt(o,"number","level")?:1)!=1) continue
 
                 val p=firstDouble(o,"pMeDem","bidPrice") ?: continue
                 val b=firstDouble(o,"qTitMeDem","bidVolume") ?: 0.0
                 val a=firstDouble(o,"qTitMeOf","askVolume") ?: 0.0
                 if(b<=0) continue
+
                 val imb=if(b+a>0)b/(b+a) else 0.0
                 val realQueue=high>0 && p>=high*0.9995 && (a<=0.0 || imb>=0.92)
-                if(realQueue){
-                    ok=true
+
+                if(rowTime in 84500..85959 && realQueue){
+                    preopenOk=true
                     break
+                }
+                if(rowTime in 90000..123000 && realQueue){
+                    intradayOk=true
                 }
             }
 
             dao.updateNextDayResult(
                 e.insCode,e.date,next.date,
-                if(ok)"QUEUE_AGAIN" else "NOT_QUEUE_NEXT_DAY"
+                when{
+                    preopenOk -> "PREOPEN_QUEUE_NEXT_DAY"
+                    intradayOk -> "QUEUE_AGAIN"
+                    else -> "NOT_QUEUE_NEXT_DAY"
+                }
             )
         }catch(_:Exception){}
     }
