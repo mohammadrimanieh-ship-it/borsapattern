@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.work.*
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -39,6 +42,7 @@ class MainActivity:ComponentActivity(){
 
     @Composable
     private fun AppTheme(content: @Composable () -> Unit){
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl){
         MaterialTheme(
             colorScheme=lightColorScheme(
                 primary=Color(0xFF5C35C8),
@@ -50,6 +54,7 @@ class MainActivity:ComponentActivity(){
             ),
             content=content
         )
+        }
     }
 
     @Composable
@@ -163,129 +168,114 @@ class MainActivity:ComponentActivity(){
             }
         }
 
-        Scaffold(
-            containerColor=MaterialTheme.colorScheme.background,
-            topBar={
+        BoxWithConstraints(
+            Modifier.fillMaxSize()
+                .background(Color(0xFFF6F7FB))
+        ){
+            val compact=maxWidth < 430.dp
+            val sidebarWidth=if(compact) 118.dp else 178.dp
+
+            // Left navigation rail stays physically on the left.
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){
                 Surface(
-                    color=Color.White,
-                    shadowElevation=2.dp
+                    modifier=Modifier
+                        .width(sidebarWidth)
+                        .fillMaxHeight()
+                        .align(Alignment.CenterStart),
+                    color=Color(0xFF0D1120),
+                    shadowElevation=8.dp
                 ){
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .padding(horizontal=18.dp,vertical=10.dp)
-                    ){
-                        Box(Modifier.fillMaxWidth()){
-                            Text(
-                                "Signal",
-                                modifier=Modifier.align(Alignment.Center),
-                                fontSize=28.sp,
-                                fontWeight=FontWeight.Black,
-                                color=Color(0xFF161827)
-                            )
-                            Text(
-                                "◯",
-                                modifier=Modifier.align(Alignment.CenterStart),
-                                fontSize=22.sp,
-                                color=Color(0xFF202232)
-                            )
-                        }
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement=Arrangement.Center,
-                            verticalAlignment=Alignment.CenterVertically
-                        ){
-                            Text(
-                                "سیگنال هوشمند بورس",
-                                color=MaterialTheme.colorScheme.primary,
-                                fontSize=12.sp,
-                                fontWeight=FontWeight.Bold
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                "v1.8-test",
-                                color=Color(0xFF666978),
-                                fontSize=10.sp
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        ScrollableTabRow(
-                            selectedTabIndex=section,
-                            edgePadding=0.dp,
-                            containerColor=Color.Transparent,
-                            contentColor=MaterialTheme.colorScheme.primary,
-                            divider={}
-                        ){
-                            Tab(section==0,{section=0},text={Text("سیگنال امروز",fontSize=12.sp)})
-                            Tab(section==3,{section=3},text={Text("استخراج داده",fontSize=12.sp)})
-                            Tab(section==1,{section=1},text={Text("بک‌تست روزانه",fontSize=12.sp)})
-                            Tab(section==4,{section=4},text={Text("پیپر تریدینگ",fontSize=12.sp)})
-                            Tab(section==2,{section=2},text={Text("جستجو",fontSize=12.sp)})
-                        }
-                    }
-                }
-            },
-            bottomBar={
-                NavigationBar(
-                    containerColor=Color.White,
-                    tonalElevation=4.dp
-                ){
-                    NavigationBarItem(
-                        selected=section==0,
-                        onClick={section=0},
-                        icon={Text("↗",fontSize=20.sp)},
-                        label={Text("سیگنال امروز",fontSize=9.sp)}
-                    )
-                    NavigationBarItem(
-                        selected=section==3,
-                        onClick={section=3},
-                        icon={Text("▱",fontSize=20.sp)},
-                        label={Text("استخراج داده",fontSize=9.sp)}
-                    )
-                    NavigationBarItem(
-                        selected=section==1,
-                        onClick={section=1},
-                        icon={Text("□",fontSize=20.sp)},
-                        label={Text("بک‌تست",fontSize=9.sp)}
-                    )
-                    NavigationBarItem(
-                        selected=section==4,
-                        onClick={section=4},
-                        icon={Text("◒",fontSize=20.sp)},
-                        label={Text("پیپر",fontSize=9.sp)}
-                    )
-                    NavigationBarItem(
-                        selected=section==2,
-                        onClick={section=2},
-                        icon={Text("⌕",fontSize=20.sp)},
-                        label={Text("جستجو",fontSize=9.sp)}
+                    SignalSidebar(
+                        compact=compact,
+                        section=section,
+                        onSection={section=it},
+                        onSettings={section=5}
                     )
                 }
             }
-        ){padding->
-            Box(
-                Modifier.fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal=12.dp)
-            ){
-                when(section){
-                    0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
-                    1 -> DailyBacktest(history)
-                    2 -> SymbolSearchPage(
-                        searchText,{searchText=it},searchResults,
-                        selectedSymbol,selectedSignals,selectedStats,{selectedSymbol=it}
-                    )
-                    3 -> DataExtractionPage(
-                        eligibleCount,syncStatus,syncDone,syncTotal,metadataStatus,
-                        onMarkets={showMarkets=true},
-                        onNames={startNameRepair()},
-                        onStart={symbolsText,years->
-                            saveExtractionSelection(symbolsText,years)
-                            startUpdate()
-                        },
-                        onAnalyze={startAnalyze()},
-                        onNextDay={startNextDayCheck()}
-                    )
-                    else -> PaperTrades(trades)
+
+            // Main content is fully RTL.
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl){
+                Column(
+                    Modifier.fillMaxSize()
+                        .padding(start=sidebarWidth)
+                ){
+                    Surface(
+                        color=Color.White,
+                        shadowElevation=1.dp
+                    ){
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .padding(horizontal=16.dp,vertical=11.dp),
+                            horizontalArrangement=Arrangement.SpaceBetween,
+                            verticalAlignment=Alignment.CenterVertically
+                        ){
+                            Column(
+                                horizontalAlignment=Alignment.End
+                            ){
+                                Text(
+                                    when(section){
+                                        0 -> "سیگنال روزانه"
+                                        1 -> "بک‌تست روزانه"
+                                        2 -> "جستجوی نماد"
+                                        3 -> "استخراج داده"
+                                        4 -> "پیپر تریدینگ"
+                                        else -> "تنظیمات پیشرفته"
+                                    },
+                                    fontSize=18.sp,
+                                    fontWeight=FontWeight.Black,
+                                    textAlign=TextAlign.Right
+                                )
+                                Text(
+                                    "Signal • v1.9-test",
+                                    fontSize=10.sp,
+                                    color=Color(0xFF777A88)
+                                )
+                            }
+                            Surface(
+                                color=Color(0xFFF0EBFF),
+                                shape=RoundedCornerShape(13.dp)
+                            ){
+                                Text(
+                                    "S",
+                                    Modifier.padding(horizontal=12.dp,vertical=7.dp),
+                                    color=MaterialTheme.colorScheme.primary,
+                                    fontWeight=FontWeight.Black
+                                )
+                            }
+                        }
+                    }
+
+                    Box(
+                        Modifier.fillMaxSize()
+                            .padding(horizontal=12.dp)
+                    ){
+                        when(section){
+                            0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
+                            1 -> DailyBacktest(history)
+                            2 -> SymbolSearchPage(
+                                searchText,{searchText=it},searchResults,
+                                selectedSymbol,selectedSignals,selectedStats,{selectedSymbol=it}
+                            )
+                            3 -> DataExtractionPage(
+                                eligibleCount,syncStatus,syncDone,syncTotal,metadataStatus,
+                                onMarkets={showMarkets=true},
+                                onNames={startNameRepair()},
+                                onStart={symbolsText,years->
+                                    saveExtractionSelection(symbolsText,years)
+                                    startUpdate()
+                                },
+                                onAnalyze={startAnalyze()},
+                                onNextDay={startNextDayCheck()}
+                            )
+                            4 -> PaperTrades(trades)
+                            else -> SettingsPage(
+                                onMarkets={showMarkets=true},
+                                onNames={startNameRepair()},
+                                onUpdate={startUpdate()}
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -303,6 +293,155 @@ class MainActivity:ComponentActivity(){
         }
     }
 
+
+    @Composable
+    private fun SignalSidebar(
+        compact:Boolean,
+        section:Int,
+        onSection:(Int)->Unit,
+        onSettings:()->Unit
+    ){
+        val items=listOf(
+            Triple(0,"◎","سیگنال روزانه"),
+            Triple(3,"▤","استخراج داده"),
+            Triple(1,"◫","بک‌تست روزانه"),
+            Triple(4,"◔","پیپر تریدینگ"),
+            Triple(2,"⌕","جستجو")
+        )
+
+        Column(
+            Modifier.fillMaxSize()
+                .padding(horizontal=if(compact) 9.dp else 14.dp,vertical=18.dp),
+            horizontalAlignment=Alignment.CenterHorizontally
+        ){
+            Surface(
+                color=Color(0xFF141A2C),
+                shape=RoundedCornerShape(22.dp),
+                border=BorderStroke(1.dp,Color(0xFF2B3650))
+            ){
+                Box(
+                    Modifier.size(if(compact) 64.dp else 82.dp),
+                    contentAlignment=Alignment.Center
+                ){
+                    Text(
+                        "↗",
+                        fontSize=if(compact) 36.sp else 44.sp,
+                        fontWeight=FontWeight.Black,
+                        color=Color(0xFF24D4BE)
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Signal",
+                color=Color.White,
+                fontSize=if(compact) 22.sp else 28.sp,
+                fontWeight=FontWeight.Black
+            )
+            Text(
+                "سیگنال هوشمند بورس",
+                color=Color(0xFFB4B8C8),
+                fontSize=if(compact) 8.sp else 10.sp,
+                textAlign=TextAlign.Center
+            )
+
+            Spacer(Modifier.height(22.dp))
+
+            items.forEach{(id,icon,label)->
+                SidebarItem(
+                    compact=compact,
+                    selected=section==id,
+                    icon=icon,
+                    label=label,
+                    onClick={onSection(id)}
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+
+            SidebarItem(
+                compact=compact,
+                selected=section==5,
+                icon="⚙",
+                label="تنظیمات پیشرفته",
+                onClick=onSettings
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Surface(
+                color=Color(0xFF151B2D),
+                shape=RoundedCornerShape(14.dp),
+                border=BorderStroke(1.dp,Color(0xFF33405B))
+            ){
+                Column(
+                    Modifier.padding(horizontal=10.dp,vertical=8.dp),
+                    horizontalAlignment=Alignment.CenterHorizontally
+                ){
+                    Text(
+                        "v1.9-test",
+                        color=Color(0xFF25D5C0),
+                        fontWeight=FontWeight.Bold,
+                        fontSize=if(compact) 9.sp else 11.sp
+                    )
+                    Text(
+                        "نسخه تست",
+                        color=Color(0xFFB8BDCB),
+                        fontSize=if(compact) 7.sp else 9.sp
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SidebarItem(
+        compact:Boolean,
+        selected:Boolean,
+        icon:String,
+        label:String,
+        onClick:()->Unit
+    ){
+        Surface(
+            modifier=Modifier.fillMaxWidth().clickable(onClick=onClick),
+            color=if(selected) Color(0xFF211C3E) else Color.Transparent,
+            shape=RoundedCornerShape(14.dp)
+        ){
+            Row(
+                Modifier.fillMaxWidth()
+                    .padding(horizontal=8.dp,vertical=9.dp),
+                verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=if(compact) Arrangement.Center else Arrangement.Start
+            ){
+                Text(
+                    icon,
+                    fontSize=if(compact) 20.sp else 22.sp,
+                    color=if(selected) Color(0xFF2AD8C1) else Color(0xFF9DA4B8)
+                )
+                if(!compact){
+                    Spacer(Modifier.width(8.dp))
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl){
+                        Text(
+                            label,
+                            modifier=Modifier.weight(1f),
+                            color=if(selected) Color.White else Color(0xFFD8DBE4),
+                            fontSize=11.sp,
+                            fontWeight=if(selected) FontWeight.Bold else FontWeight.Normal,
+                            textAlign=TextAlign.Right
+                        )
+                    }
+                }
+            }
+        }
+        if(compact){
+            Text(
+                label,
+                color=if(selected) Color.White else Color(0xFFAEB4C5),
+                fontSize=7.sp,
+                textAlign=TextAlign.Center,
+                modifier=Modifier.fillMaxWidth().padding(top=2.dp)
+            )
+        }
+    }
 
     @Composable
     private fun DailySignals(

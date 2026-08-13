@@ -70,10 +70,21 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             val extractPrefs=applicationContext.getSharedPreferences("extract",Context.MODE_PRIVATE)
             val requestedSymbols=extractPrefs.getStringSet("symbols",emptySet()) ?: emptySet()
             val years=extractPrefs.getInt("years",5).coerceIn(1,5)
-            val symbols=dao.allSymbols().filter{
+            val allStored=dao.allSymbols()
+            val allMarketsSelected=wantedSegments.containsAll(MarketPrefs.allSegments)
+
+            val symbols=allStored.filter{
                 val effectiveType=MarketPrefs.classifyType(
                     it.symbol,it.name,it.flow,it.boardTitle
                 )
+                val effectiveSegment=MarketPrefs.classify(it.flow,it.boardTitle).let{derived->
+                    when{
+                        derived!=MarketPrefs.OTHER -> derived
+                        it.segment!=MarketPrefs.OTHER -> it.segment
+                        else -> MarketPrefs.OTHER
+                    }
+                }
+
                 val supportedType =
                     effectiveType==MarketPrefs.TYPE_STOCK ||
                     effectiveType==MarketPrefs.TYPE_BASE ||
@@ -82,17 +93,31 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                         MarketPrefs.isLeveragedFund(it.symbol,it.name)
                     )
 
-                wantedSegments.contains(it.segment) &&
+                val segmentAllowed =
+                    wantedSegments.contains(effectiveSegment) ||
+                    (
+                        effectiveSegment==MarketPrefs.OTHER &&
+                        allMarketsSelected
+                    )
+
+                segmentAllowed &&
                 wantedTypes.contains(effectiveType) &&
                 supportedType &&
+                !it.symbol.isNullOrBlank() &&
                 (requestedSymbols.isEmpty() || requestedSymbols.contains(it.symbol))
             }
+
             if(symbols.isEmpty()){
                 prefs.edit()
-                    .putString("sync_status","فهرست نمادها دریافت نشد؛ بعداً دوباره تلاش می‌شود")
+                    .putInt("sync_total",0)
+                    .putInt("sync_done",0)
+                    .putString(
+                        "sync_status",
+                        "Universe معتبر صفر شد؛ ${allStored.size} رکورد نماد در دیتابیس هست ولی هیچ‌کدام با فیلتر فعلی منطبق نشد"
+                    )
                     .putBoolean("sync_running",false)
                     .apply()
-                return Result.retry()
+                return Result.success()
             }
 
             val total=symbols.size
@@ -186,10 +211,13 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             Result.success()
         }catch(e:Exception){
             prefs.edit()
-                .putString("sync_status","اتصال قطع شد؛ WorkManager دوباره تلاش می‌کند")
-                .putBoolean("sync_running",true)
+                .putString(
+                    "sync_status",
+                    "خطای دریافت داده: ${e.message ?: "نامشخص"} — دوباره «شروع استخراج» را بزنید"
+                )
+                .putBoolean("sync_running",false)
                 .apply()
-            Result.retry()
+            Result.success()
         }
     }
 
@@ -208,7 +236,7 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
 
             WorkManager.getInstance(context).enqueueUniqueWork(
                 HISTORY_CHAIN,
-                if(replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                ExistingWorkPolicy.REPLACE,
                 req
             )
         }
