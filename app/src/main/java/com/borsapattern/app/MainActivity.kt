@@ -8,6 +8,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -156,7 +157,7 @@ class MainActivity:ComponentActivity(){
                                 fontSize=13.sp
                             )
                             Text(
-                                "v1.2.1",
+                                "v1.3-test",
                                 color=Color.Gray,
                                 fontSize=11.sp,
                                 fontWeight=FontWeight.Bold
@@ -174,42 +175,32 @@ class MainActivity:ComponentActivity(){
                     edgePadding=0.dp,
                     containerColor=Color.Transparent
                 ){
-                    Tab(section==0,{section=0},text={Text("داشبورد")})
-                    Tab(section==1,{section=1},text={Text("فرصت‌ها")})
-                    Tab(section==2,{section=2},text={Text("تاریخچه")})
-                    Tab(section==3,{section=3},text={Text("آزمایشی")})
-                    Tab(section==4,{section=4},text={Text("جستجو 🔎")})
-                    Tab(section==5,{section=5},text={Text("تنظیمات")})
-                }
-
-                if(section==0){
-                    FilledTonalButton(
-                        onClick={section=4},
-                        modifier=Modifier.fillMaxWidth().padding(top=6.dp)
-                    ){
-                        Text("🔎 جستجوی نماد و تاریخچه سیگنال")
-                    }
+                    Tab(section==0,{section=0},text={Text("سیگنال امروز")})
+                    Tab(section==1,{section=1},text={Text("بک‌تست روزانه")})
+                    Tab(section==2,{section=2},text={Text("جستجو 🔎")})
+                    Tab(section==3,{section=3},text={Text("استخراج داده")})
+                    Tab(section==4,{section=4},text={Text("آزمایشی")})
                 }
 
                 when(section){
-                    0 -> Dashboard(
-                        records,symbols,candidates,confirmed,rejected,errors,latest,
-                        syncStatus,syncDone,syncTotal,
-                        analysisStatus,analysisDone,analysisTotal,
-                        metadataStatus,liveEnabled,lastLiveScan,
-                        onLiveToggle={liveEnabled=it},
-                        onUpdate={startUpdate()},
-                        onAnalyze={startAnalyze()}
+                    0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
+                    1 -> DailyBacktest(history)
+                    2 -> SymbolSearchPage(
+                        searchText,{searchText=it},searchResults,
+                        selectedSymbol,selectedSignals,{selectedSymbol=it}
                     )
-                    1 -> Opportunities(scores)
-                    2 -> QueueHistory(history)
-                    3 -> PaperTrades(trades)
-                    4 -> SymbolSearchPage(searchText,{searchText=it},searchResults,selectedSymbol,selectedSignals,{selectedSymbol=it})
-                    else -> SettingsPage(
+                    3 -> DataExtractionPage(
+                        syncStatus,syncDone,syncTotal,metadataStatus,
                         onMarkets={showMarkets=true},
                         onNames={startNameRepair()},
-                        onUpdate={startUpdate()}
+                        onStart={symbolsText,years->
+                            saveExtractionSelection(symbolsText,years)
+                            startUpdate()
+                        },
+                        onAnalyze={startAnalyze()},
+                        onNextDay={startNextDayCheck()}
                     )
+                    else -> PaperTrades(trades)
                 }
             }
         }
@@ -224,6 +215,167 @@ class MainActivity:ComponentActivity(){
                     showMarkets=false
                 }
             )
+        }
+    }
+
+
+    @Composable
+    private fun DailySignals(
+        scores:List<LiveScoreEntity>,
+        liveEnabled:Boolean,
+        onLiveToggle:(Boolean)->Unit,
+        lastLiveScan:Long?
+    ){
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            verticalArrangement=Arrangement.spacedBy(10.dp),
+            contentPadding=PaddingValues(vertical=10.dp)
+        ){
+            item{
+                Card(
+                    shape=RoundedCornerShape(22.dp),
+                    colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)
+                ){
+                    Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                        Text("سیگنال‌های امروز",fontSize=22.sp,fontWeight=FontWeight.Black)
+                        Text("فقط خروجی نهایی موتور سیگنال نمایش داده می‌شود.",fontSize=12.sp)
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement=Arrangement.SpaceBetween,
+                            verticalAlignment=Alignment.CenterVertically
+                        ){
+                            Text(if(liveEnabled)"رصد زنده فعال است" else "رصد زنده خاموش است")
+                            Switch(checked=liveEnabled,onCheckedChange=onLiveToggle)
+                        }
+                        if(lastLiveScan!=null) Text("آخرین اسکن: ${clock(lastLiveScan)}",fontSize=11.sp)
+                    }
+                }
+            }
+            val strong=scores.filter{it.score>=60}.sortedByDescending{it.score}
+            if(strong.isEmpty()){
+                item{Empty("فعلاً سیگنال روزانه قابل نمایش نیست")}
+            }else{
+                items(strong){s->
+                    Card(shape=RoundedCornerShape(18.dp)){
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            horizontalArrangement=Arrangement.SpaceBetween,
+                            verticalAlignment=Alignment.CenterVertically
+                        ){
+                            Column(Modifier.weight(1f)){
+                                Text(s.symbol?:"در حال تکمیل نام",fontSize=19.sp,fontWeight=FontWeight.Bold)
+                                Text(
+                                    when{
+                                        s.score>=85 -> "سیگنال قوی"
+                                        s.score>=70 -> "سیگنال"
+                                        else -> "تحت نظر"
+                                    },
+                                    color=MaterialTheme.colorScheme.primary,
+                                    fontWeight=FontWeight.Bold
+                                )
+                                Text("آخرین قیمت: ${fa(s.lastPrice.toLong())}",fontSize=11.sp)
+                            }
+                            ScoreBadge(s.score)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun DailyBacktest(history:List<QueueHistoryRow>){
+        val grouped=history.groupBy{it.date}.toSortedMap(compareByDescending{it})
+        LazyColumn(
+            verticalArrangement=Arrangement.spacedBy(10.dp),
+            contentPadding=PaddingValues(vertical=10.dp)
+        ){
+            item{
+                Text("اگر در هر روز طبق الگوریتم عمل می‌کردیم چه می‌شد؟",
+                    fontSize=18.sp,fontWeight=FontWeight.Black)
+            }
+            grouped.forEach{(date,rows)->
+                item{
+                    Card(shape=RoundedCornerShape(20.dp)){
+                        Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
+                            Text(Jalali.fromGregorianInt(date),fontSize=18.sp,fontWeight=FontWeight.Black)
+                            rows.forEach{s->
+                                HorizontalDivider()
+                                Text(s.symbol?:"در حال تکمیل نام",fontWeight=FontWeight.Bold)
+                                Text("هشدار: ${fmtTime(s.signalTime)} • صف: ${fmtTime(s.eventTime)} • امتیاز ${fa(s.score.toInt())}")
+                                Text(when(s.nextDayQueueStatus){
+                                    "QUEUE_AGAIN" -> "روز معاملاتی بعد: صف خرید ماند ✅"
+                                    "NOT_QUEUE_NEXT_DAY" -> "روز معاملاتی بعد: صف خرید نماند ❌"
+                                    "NO_NEXT_DAY" -> "روز بعد: داده موجود نیست"
+                                    else -> "روز بعد: هنوز بررسی نشده"
+                                },fontSize=12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun DataExtractionPage(
+        syncStatus:String,syncDone:Int,syncTotal:Int,metadataStatus:String,
+        onMarkets:()->Unit,onNames:()->Unit,
+        onStart:(String,Int)->Unit,onAnalyze:()->Unit,onNextDay:()->Unit
+    ){
+        var symbolsText by remember{mutableStateOf("")}
+        var years by remember{mutableIntStateOf(5)}
+        LazyColumn(
+            verticalArrangement=Arrangement.spacedBy(10.dp),
+            contentPadding=PaddingValues(vertical=10.dp)
+        ){
+            item{
+                Card(shape=RoundedCornerShape(22.dp)){
+                    Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+                        Text("استخراج داده",fontSize=22.sp,fontWeight=FontWeight.Black)
+                        Text("قبل از شروع، بازارها یا نمادهای موردنظر را انتخاب کن. اختیار معامله به‌طور کامل حذف شده است.",fontSize=12.sp)
+                        Button(onClick=onMarkets,modifier=Modifier.fillMaxWidth()){Text("انتخاب بازار و نوع اوراق")}
+                        OutlinedTextField(
+                            value=symbolsText,onValueChange={symbolsText=it},
+                            modifier=Modifier.fillMaxWidth(),
+                            label={Text("نمادهای خاص (اختیاری)")},
+                            supportingText={Text("مثال: وبملت، خودرو، شستا — خالی = همه نمادهای انتخاب‌شده")}
+                        )
+                        Text("بازه تاریخی")
+                        Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                            (1..5).forEach{y->
+                                FilterChip(
+                                    selected=years==y,onClick={years=y},
+                                    label={Text("$y سال")}
+                                )
+                            }
+                        }
+                        Button(onClick={onStart(symbolsText,years)},modifier=Modifier.fillMaxWidth()){
+                            Text("شروع استخراج")
+                        }
+                    }
+                }
+            }
+            item{ProcessCard("دریافت تاریخچه",syncStatus,syncDone,syncTotal)}
+            item{
+                Card(shape=RoundedCornerShape(18.dp)){
+                    Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+                        Text("نام نمادها",fontWeight=FontWeight.Bold)
+                        Text(metadataStatus,fontSize=12.sp)
+                        FilledTonalButton(onClick=onNames,modifier=Modifier.fillMaxWidth()){
+                            Text("ترمیم فقط نام‌های ناقص")
+                        }
+                    }
+                }
+            }
+            item{FilledTonalButton(onClick=onAnalyze,modifier=Modifier.fillMaxWidth()){Text("تحلیل دیتاست تاریخی")}}
+            item{FilledTonalButton(onClick=onNextDay,modifier=Modifier.fillMaxWidth()){Text("بررسی ماندگاری صف روز بعد")}}
+            item{
+                Text(
+                    "هدف این نسخه: تاریخچه تا ۵ سال. داده‌هایی که منبع عمومی ارائه کند ذخیره می‌شوند؛ داده‌های غیرعمومی یا هویت اشخاص قابل استخراج نیست.",
+                    fontSize=11.sp,color=Color.Gray
+                )
+            }
         }
     }
 
@@ -419,7 +571,11 @@ class MainActivity:ComponentActivity(){
         LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp),contentPadding=PaddingValues(vertical=10.dp)){
             item{OutlinedTextField(value=query,onValueChange=onQuery,modifier=Modifier.fillMaxWidth(),
                 singleLine=true,label={Text("جستجوی نماد")})}
-            items(results){s->Card(onClick={onSelect(s)},shape=RoundedCornerShape(16.dp)){Column(Modifier.padding(14.dp)){
+            items(results){s->
+                Card(
+                    modifier=Modifier.fillMaxWidth().clickable{onSelect(s)},
+                    shape=RoundedCornerShape(16.dp)
+                ){Column(Modifier.padding(14.dp)){
                 Text(s.symbol?:s.name?:"نماد",fontWeight=FontWeight.Bold,fontSize=18.sp)
                 if(!s.name.isNullOrBlank()&&s.name!=s.symbol) Text(s.name!!,fontSize=11.sp,color=Color.Gray)
             }}}
@@ -538,7 +694,7 @@ class MainActivity:ComponentActivity(){
         val rows=listOf(
             listOf(MarketPrefs.TYPE_STOCK,MarketPrefs.TYPE_BASE),
             listOf(MarketPrefs.TYPE_HOUSING,MarketPrefs.TYPE_RIGHT),
-            listOf(MarketPrefs.TYPE_BOND,MarketPrefs.TYPE_OPTION),
+            listOf(MarketPrefs.TYPE_BOND),
             listOf(MarketPrefs.TYPE_FUTURE,MarketPrefs.TYPE_FUND),
             listOf(MarketPrefs.TYPE_COMMODITY,MarketPrefs.TYPE_TAL),
             listOf(MarketPrefs.TYPE_ENERGY)
@@ -616,6 +772,21 @@ class MainActivity:ComponentActivity(){
                 TextButton(onClick=onDismiss){Text("انصراف")}
             }
         )
+    }
+
+
+    private fun saveExtractionSelection(raw:String,years:Int){
+        val symbols=raw
+            .replace("،",",")
+            .split(",")
+            .map{it.trim()}
+            .filter{it.isNotEmpty()}
+            .toSet()
+        getSharedPreferences("extract",Context.MODE_PRIVATE)
+            .edit()
+            .putStringSet("symbols",symbols)
+            .putInt("years",years.coerceIn(1,5))
+            .apply()
     }
 
     private fun startUpdate(){

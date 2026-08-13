@@ -55,8 +55,14 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
 
             val wantedSegments=MarketPrefs.selectedSegments(applicationContext)
             val wantedTypes=MarketPrefs.selectedTypes(applicationContext)
+            val extractPrefs=applicationContext.getSharedPreferences("extract",Context.MODE_PRIVATE)
+            val requestedSymbols=extractPrefs.getStringSet("symbols",emptySet()) ?: emptySet()
+            val years=extractPrefs.getInt("years",5).coerceIn(1,5)
             val symbols=dao.allSymbols().filter{
-                wantedSegments.contains(it.segment) && wantedTypes.contains(it.instrumentType)
+                wantedSegments.contains(it.segment) &&
+                wantedTypes.contains(it.instrumentType) &&
+                it.instrumentType != MarketPrefs.TYPE_OPTION &&
+                (requestedSymbols.isEmpty() || requestedSymbols.contains(it.symbol))
             }
             if(symbols.isEmpty()){
                 prefs.edit()
@@ -69,7 +75,7 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             val total=symbols.size
             val start=offset.coerceIn(0,total)
             val end=min(start+batchSize,total)
-            val cutoff=LocalDate.now().minusDays(370)
+            val cutoff=LocalDate.now().minusDays((years*366L)+10L)
 
             prefs.edit()
                 .putInt("sync_total",total)

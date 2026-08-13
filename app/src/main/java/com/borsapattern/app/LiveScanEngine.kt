@@ -40,6 +40,7 @@ object LiveScanEngine {
                 flow,
                 board
             )
+            if(type==MarketPrefs.TYPE_OPTION) continue
             if(!wantedSegments.contains(segment) || !wantedTypes.contains(type)) continue
             raws += Raw(ins,rawSymbol,rawName,flow,board,last,y,vol,value)
         }

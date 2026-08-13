@@ -33,7 +33,6 @@ object MarketPrefs {
         TYPE_HOUSING,
         TYPE_RIGHT,
         TYPE_BOND,
-        TYPE_OPTION,
         TYPE_FUTURE,
         TYPE_FUND,
         TYPE_COMMODITY,
