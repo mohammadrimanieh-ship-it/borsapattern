@@ -142,8 +142,19 @@ interface BorsaDao {
       SELECT COUNT(*) FROM queue_events e
       INNER JOIN symbols s ON s.insCode=e.insCode
       WHERE e.status='ERROR'
-        AND s.segment IN (:segments)
         AND s.instrumentType IN (:types)
+        AND (
+          s.segment IN (:segments)
+          OR (
+            s.instrumentType='TYPE_FUND'
+            AND (
+              COALESCE(s.symbol,'') LIKE '%اهرم%'
+              OR COALESCE(s.name,'') LIKE '%اهرم%'
+              OR COALESCE(s.name,'') LIKE '%اهرمی%'
+              OR COALESCE(s.symbol,'') IN ('توان','شتاب','موج','جهش','بیدار','دوایکس')
+            )
+          )
+        )
     """)
     suspend fun errorCountFor(segments:List<String>,types:List<String>):Int
 
@@ -245,8 +256,19 @@ interface BorsaDao {
       SELECT e.* FROM queue_events e
       INNER JOIN symbols s ON s.insCode=e.insCode
       WHERE e.status='CANDIDATE'
-        AND s.segment IN (:segments)
         AND s.instrumentType IN (:types)
+        AND (
+          s.segment IN (:segments)
+          OR (
+            s.instrumentType='TYPE_FUND'
+            AND (
+              COALESCE(s.symbol,'') LIKE '%اهرم%'
+              OR COALESCE(s.name,'') LIKE '%اهرم%'
+              OR COALESCE(s.name,'') LIKE '%اهرمی%'
+              OR COALESCE(s.symbol,'') IN ('توان','شتاب','موج','جهش','بیدار','دوایکس')
+            )
+          )
+        )
       ORDER BY e.date DESC LIMIT :limit
     """)
     suspend fun candidateEventsFor(segments:List<String>,types:List<String>,limit:Int):List<QueueEventEntity>
@@ -255,8 +277,19 @@ interface BorsaDao {
       SELECT COUNT(*) FROM queue_events e
       INNER JOIN symbols s ON s.insCode=e.insCode
       WHERE e.status='CANDIDATE'
-        AND s.segment IN (:segments)
         AND s.instrumentType IN (:types)
+        AND (
+          s.segment IN (:segments)
+          OR (
+            s.instrumentType='TYPE_FUND'
+            AND (
+              COALESCE(s.symbol,'') LIKE '%اهرم%'
+              OR COALESCE(s.name,'') LIKE '%اهرم%'
+              OR COALESCE(s.name,'') LIKE '%اهرمی%'
+              OR COALESCE(s.symbol,'') IN ('توان','شتاب','موج','جهش','بیدار','دوایکس')
+            )
+          )
+        )
     """)
     suspend fun candidateCountFor(segments:List<String>,types:List<String>):Int
 

@@ -11,10 +11,10 @@ object PatternEngine {
         sql.execSQL("DELETE FROM queue_events")
 
         val c=sql.query("""
-          SELECT d.insCode,d.date,d.high,d.yesterday,d.volume,d.value
+          SELECT d.insCode,d.date,d.high,d.last,d.yesterday,d.volume,d.value
           FROM daily d
           INNER JOIN symbols s ON s.insCode=d.insCode
-          WHERE d.yesterday>0 AND d.volume>0
+          WHERE d.yesterday>0 AND d.volume>0 AND d.value>0
             AND (
               (
                 s.segment IN ('BOURSE','FARABOURSE','BASE_YELLOW','BASE_ORANGE','BASE_RED')
@@ -36,50 +36,110 @@ object PatternEngine {
         val events=mutableListOf<QueueEventEntity>()
         var currentIns:String?=null
         val recentPositive=ArrayDeque<Double>()
+        val recentValues=ArrayDeque<Double>()
 
         c.use {
             while(it.moveToNext()){
                 val ins=it.getString(0)
                 val date=it.getInt(1)
                 val high=if(it.isNull(2)) null else it.getDouble(2)
-                val y=if(it.isNull(3)) null else it.getDouble(3)
-                val vol=if(it.isNull(4)) 0.0 else it.getDouble(4)
-                val value=if(it.isNull(5)) 0.0 else it.getDouble(5)
+                val last=if(it.isNull(3)) null else it.getDouble(3)
+                val y=if(it.isNull(4)) null else it.getDouble(4)
+                val vol=if(it.isNull(5)) 0.0 else it.getDouble(5)
+                val value=if(it.isNull(6)) 0.0 else it.getDouble(6)
 
                 if(currentIns!=ins){
                     currentIns=ins
                     recentPositive.clear()
+                    recentValues.clear()
                 }
 
-                if(high==null || y==null || y<=0 || vol<=0 || value<=0) continue
+                if(high==null || y==null || y<=0 || vol<=0 || value<=0){
+                    continue
+                }
+
                 val rise=high/y-1.0
-                if(rise<=0) continue
+                val closeToHigh=
+                    if(last!=null && high>0) (last/high).coerceIn(0.0,1.2)
+                    else 0.0
 
-                val special=isLikelySpecialRise(rise,recentPositive.toList())
+                if(rise>0){
+                    val special=isLikelySpecialRise(rise,recentPositive.toList())
 
-                if(special){
-                    events += QueueEventEntity(
-                        insCode=ins,
-                        date=date,
-                        eventTime=null,
-                        queueValue=null,
-                        score=0.0,
-                        status="SPECIAL_REOPEN",
-                        signalTime=null,
-                        nextTradingDate=null,
-                        nextDayQueueStatus="SKIPPED_SPECIAL_REOPEN"
-                    )
-                }else if(rise>=0.015){
-                    // Candidate only. Best-limits history decides whether a real queue existed.
-                    val seed=(48.0 + min(22.0,rise*450.0)).coerceIn(48.0,70.0)
-                    events += QueueEventEntity(
-                        insCode=ins,date=date,eventTime=null,queueValue=null,
-                        score=seed,status="CANDIDATE"
-                    )
+                    if(special){
+                        events += QueueEventEntity(
+                            insCode=ins,
+                            date=date,
+                            eventTime=null,
+                            queueValue=null,
+                            score=0.0,
+                            status="SPECIAL_REOPEN",
+                            signalTime=null,
+                            nextTradingDate=null,
+                            nextDayQueueStatus="SKIPPED_SPECIAL_REOPEN"
+                        )
+                    }else{
+                        // Cheap pre-filter before requesting historical BestLimits.
+                        // A real persistent queue day should normally reach the upper
+                        // tail of this symbol's own recent positive range and trade
+                        // close to the daily high.
+                        val positives=recentPositive
+                            .filter{it>0.0 && it<0.095}
+                            .sorted()
+
+                        val p85=if(positives.size>=12){
+                            positives[((positives.size-1)*0.85).toInt()]
+                        }else 0.03
+
+                        val dynamicRiseThreshold=
+                            max(0.018,min(0.060,p85*0.92))
+
+                        val values=recentValues.filter{it>0}.sorted()
+                        val medianValue=if(values.isNotEmpty()){
+                            values[values.size/2]
+                        }else 0.0
+                        val liquidEnough=
+                            medianValue<=0.0 || value>=medianValue*0.35
+
+                        val likelyQueueDay=
+                            rise>=dynamicRiseThreshold &&
+                            closeToHigh>=0.985 &&
+                            liquidEnough
+
+                        if(likelyQueueDay){
+                            val riseQuality=
+                                ((rise-dynamicRiseThreshold)/0.04)
+                                    .coerceIn(0.0,1.0)
+                            val closeQuality=
+                                ((closeToHigh-0.985)/0.015)
+                                    .coerceIn(0.0,1.0)
+                            val seed=(
+                                52.0 +
+                                riseQuality*10.0 +
+                                closeQuality*8.0
+                            ).coerceIn(52.0,70.0)
+
+                            events += QueueEventEntity(
+                                insCode=ins,
+                                date=date,
+                                eventTime=null,
+                                queueValue=null,
+                                score=seed,
+                                status="CANDIDATE"
+                            )
+                        }
+                    }
+
+                    recentPositive.addLast(rise)
+                    while(recentPositive.size>60){
+                        recentPositive.removeFirst()
+                    }
                 }
 
-                recentPositive.addLast(rise)
-                while(recentPositive.size>40) recentPositive.removeFirst()
+                recentValues.addLast(value)
+                while(recentValues.size>40){
+                    recentValues.removeFirst()
+                }
             }
         }
 

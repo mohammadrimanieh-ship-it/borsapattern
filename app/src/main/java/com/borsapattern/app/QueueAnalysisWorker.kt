@@ -13,17 +13,22 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
     override suspend fun doWork():Result=coroutineScope{
         val modelVersion=prefs.getInt("analysis_model_version",0)
-        if(modelVersion<6){
+        if(modelVersion<7){
             prefs.edit()
                 .putBoolean("analysis_running",true)
-                .putString("analysis_status","بازسازی مدل صف پایدار و ترمیم زنجیره تحلیل")
+                .putString("analysis_status","بازسازی کاندیدهای سبک و شروع تحلیل صف پایدار")
                 .apply()
             val db=(applicationContext as BorsaApp).db
             db.openHelper.writableDatabase.execSQL("DELETE FROM prequeue_snapshots")
             PatternEngine.rebuildCandidates(db)
             applicationContext.getSharedPreferences("prequeue_backtest",Context.MODE_PRIVATE)
                 .edit().clear().apply()
-            prefs.edit().putInt("analysis_model_version",6).apply()
+            prefs.edit()
+                .remove("analysis_total_all")
+                .remove("analysis_batch_done")
+                .remove("analysis_batch_total")
+                .putInt("analysis_model_version",7)
+                .apply()
         }else{
             PatternEngine.seedInitialEvents((applicationContext as BorsaApp).db)
         }
@@ -33,27 +38,43 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
         val types=MarketPrefs.selectedTypes(applicationContext).toList()
         val batchSize=inputData.getInt("batchSize",120).coerceIn(20,240)
         val parallelism=inputData.getInt("parallelism",4).coerceIn(1,6)
+
+        val remainingBefore=dao.candidateCountFor(segments,types)
+        val storedTotal=prefs.getInt("analysis_total_all",0)
+        val totalAll=when{
+            storedTotal<=0 -> remainingBefore
+            remainingBefore>storedTotal -> remainingBefore
+            else -> storedTotal
+        }
+        if(totalAll!=storedTotal){
+            prefs.edit().putInt("analysis_total_all",totalAll).apply()
+        }
+
         val candidates=dao.candidateEventsFor(segments,types,batchSize)
 
         if(candidates.isEmpty()){
             prefs.edit()
                 .putBoolean("analysis_running",false)
-                .putInt("analysis_batch_done",0)
-                .putInt("analysis_batch_total",0)
+                .putInt("analysis_batch_done",totalAll)
+                .putInt("analysis_batch_total",totalAll)
                 .putString(
                     "analysis_status",
-                    "صف روز اول کامل است؛ بررسی خودکار نتیجه روز کاری بعد شروع شد"
+                    "صف پایدار روز اول کامل شد؛ بررسی خودکار نتیجه روز کاری بعد شروع شد"
                 )
                 .apply()
             enqueueNextDay()
             return@coroutineScope Result.success()
         }
 
+        val alreadyDone=(totalAll-remainingBefore).coerceAtLeast(0)
         prefs.edit()
             .putBoolean("analysis_running",true)
-            .putInt("analysis_batch_total",candidates.size)
-            .putInt("analysis_batch_done",0)
-            .putString("analysis_status","شروع تحلیل سریع صف‌ها")
+            .putInt("analysis_batch_total",totalAll)
+            .putInt("analysis_batch_done",alreadyDone)
+            .putString(
+                "analysis_status",
+                "تحلیل صف پایدار: $alreadyDone از $totalAll"
+            )
             .apply()
 
         val done=AtomicInteger(0)
@@ -65,23 +86,35 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 async(Dispatchers.IO){
                     analyzeOne(e)
                     val n=done.incrementAndGet()
+                    val cumulative=(alreadyDone+n).coerceAtMost(totalAll)
                     prefs.edit()
-                        .putInt("analysis_batch_done",n)
-                        .putString("analysis_status","تحلیل سریع: $n از ${candidates.size}")
+                        .putInt("analysis_batch_done",cumulative)
+                        .putInt("analysis_batch_total",totalAll)
+                        .putString(
+                            "analysis_status",
+                            "تحلیل صف پایدار: $cumulative از $totalAll"
+                        )
                         .apply()
-                    setProgress(workDataOf("processed" to n,"total" to candidates.size))
+                    setProgress(
+                        workDataOf("processed" to cumulative,"total" to totalAll)
+                    )
                 }
             }.awaitAll()
             yield()
         }
 
         val remaining=dao.candidateCountFor(segments,types)
+        val completed=(totalAll-remaining).coerceIn(0,totalAll)
         prefs.edit()
             .putBoolean("analysis_running",remaining>0)
+            .putInt("analysis_batch_done",completed)
+            .putInt("analysis_batch_total",totalAll)
             .putString(
                 "analysis_status",
-                if(remaining>0) "این مرحله تمام شد؛ $remaining کاندید باقی مانده"
-                else "تحلیل دسته‌های انتخاب‌شده کامل شد"
+                if(remaining>0)
+                    "تحلیل صف پایدار: $completed از $totalAll • $remaining باقی‌مانده"
+                else
+                    "صف پایدار روز اول کامل شد"
             )
             .apply()
 
@@ -95,13 +128,27 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                         "resetErrors" to false
                     )
                 )
-                .setInitialDelay(2,TimeUnit.SECONDS)
+                .setInitialDelay(1,TimeUnit.SECONDS)
                 .build()
 
-            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            val wm=WorkManager.getInstance(applicationContext)
+            wm.enqueueUniqueWork(
                 ANALYSIS_CHAIN,
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
                 next
+            )
+
+            // Independent watchdog: if Android/WorkManager drops the appended
+            // continuation, the coordinator will see remaining candidates and
+            // restart the missing stage automatically.
+            val watchdog=OneTimeWorkRequestBuilder<PipelineCoordinatorWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInitialDelay(6,TimeUnit.SECONDS)
+                .build()
+            wm.enqueueUniqueWork(
+                PipelineCoordinatorWorker.CHAIN,
+                ExistingWorkPolicy.REPLACE,
+                watchdog
             )
         }else{
             prefs.edit()
