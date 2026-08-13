@@ -62,6 +62,7 @@ class MainActivity:ComponentActivity(){
 
         var symbols by remember{mutableStateOf(0)}
         var records by remember{mutableStateOf(0)}
+        var eligibleCount by remember{mutableStateOf(0)}
         var candidates by remember{mutableStateOf(0)}
         var confirmed by remember{mutableStateOf(0)}
         var rejected by remember{mutableStateOf(0)}
@@ -96,6 +97,14 @@ class MainActivity:ComponentActivity(){
                 val types=MarketPrefs.selectedTypes(this@MainActivity).toList()
                 symbols=app.db.dao().symbolCount()
                 records=app.db.dao().dailyCount()
+                eligibleCount=app.db.dao().allSymbols().count{
+                    val effectiveType=MarketPrefs.classifyType(
+                        it.symbol,it.name,it.flow,it.boardTitle
+                    )
+                    MarketPrefs.isSignalUniverse(
+                        it.segment,effectiveType,it.symbol,it.name
+                    )
+                }
                 candidates=app.db.dao().candidateCount()
                 confirmed=app.db.dao().confirmedCount()
                 rejected=app.db.dao().rejectedCount()
@@ -193,7 +202,7 @@ class MainActivity:ComponentActivity(){
                             )
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                "v1.7-test",
+                                "v1.8-test",
                                 color=Color(0xFF666978),
                                 fontSize=10.sp
                             )
@@ -266,7 +275,7 @@ class MainActivity:ComponentActivity(){
                         selectedSymbol,selectedSignals,selectedStats,{selectedSymbol=it}
                     )
                     3 -> DataExtractionPage(
-                        syncStatus,syncDone,syncTotal,metadataStatus,
+                        eligibleCount,syncStatus,syncDone,syncTotal,metadataStatus,
                         onMarkets={showMarkets=true},
                         onNames={startNameRepair()},
                         onStart={symbolsText,years->
@@ -548,29 +557,104 @@ class MainActivity:ComponentActivity(){
     @Composable
     private fun DailyBacktest(history:List<QueueHistoryRow>){
         val grouped=history.groupBy{it.date}.toSortedMap(compareByDescending{it})
+
         LazyColumn(
-            verticalArrangement=Arrangement.spacedBy(10.dp),
-            contentPadding=PaddingValues(vertical=10.dp)
+            verticalArrangement=Arrangement.spacedBy(12.dp),
+            contentPadding=PaddingValues(top=12.dp,bottom=18.dp)
         ){
             item{
-                Text("اگر در هر روز طبق الگوریتم عمل می‌کردیم چه می‌شد؟",
-                    fontSize=18.sp,fontWeight=FontWeight.Black)
+                PageHero(
+                    eyebrow="BACKTEST",
+                    title="بک‌تست روزانه",
+                    subtitle="نتیجه واقعی سیگنال‌های تاریخی، روز به روز"
+                )
             }
-            grouped.forEach{(date,rows)->
-                item{
-                    Card(shape=RoundedCornerShape(20.dp)){
-                        Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
-                            Text(Jalali.fromGregorianInt(date),fontSize=18.sp,fontWeight=FontWeight.Black)
-                            rows.forEach{s->
-                                HorizontalDivider()
-                                Text(s.symbol?:"در حال تکمیل نام",fontWeight=FontWeight.Bold)
-                                Text("هشدار: ${fmtTime(s.signalTime)} • صف: ${fmtTime(s.eventTime)} • امتیاز ${fa(s.score.toInt())}")
-                                Text(when(s.nextDayQueueStatus){
-                                    "QUEUE_AGAIN" -> "روز معاملاتی بعد: صف خرید ماند ✅"
-                                    "NOT_QUEUE_NEXT_DAY" -> "روز معاملاتی بعد: صف خرید نماند ❌"
-                                    "NO_NEXT_DAY" -> "روز بعد: داده موجود نیست"
-                                    else -> "روز بعد: هنوز بررسی نشده"
-                                },fontSize=12.sp)
+
+            if(grouped.isEmpty()){
+                item{ PolishedEmpty("هنوز نتیجه بک‌تست روزانه ثبت نشده است.") }
+            }else{
+                grouped.forEach{(date,rows)->
+                    item{
+                        Card(
+                            shape=RoundedCornerShape(22.dp),
+                            colors=CardDefaults.cardColors(containerColor=Color.White),
+                            border=BorderStroke(1.dp,Color(0xFFE6E8F0))
+                        ){
+                            Column(
+                                Modifier.padding(16.dp),
+                                verticalArrangement=Arrangement.spacedBy(10.dp)
+                            ){
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement=Arrangement.SpaceBetween,
+                                    verticalAlignment=Alignment.CenterVertically
+                                ){
+                                    Text(
+                                        Jalali.fromGregorianInt(date),
+                                        fontSize=18.sp,
+                                        fontWeight=FontWeight.Black,
+                                        color=Color(0xFF171927)
+                                    )
+                                    Surface(
+                                        color=Color(0xFFF0EBFF),
+                                        shape=RoundedCornerShape(12.dp)
+                                    ){
+                                        Text(
+                                            "${fa(rows.size)} سیگنال",
+                                            Modifier.padding(horizontal=10.dp,vertical=5.dp),
+                                            color=MaterialTheme.colorScheme.primary,
+                                            fontSize=11.sp,
+                                            fontWeight=FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                rows.forEach{s->
+                                    Surface(
+                                        color=Color(0xFFF9FAFC),
+                                        shape=RoundedCornerShape(16.dp)
+                                    ){
+                                        Column(
+                                            Modifier.fillMaxWidth().padding(12.dp),
+                                            verticalArrangement=Arrangement.spacedBy(4.dp)
+                                        ){
+                                            Row(
+                                                Modifier.fillMaxWidth(),
+                                                horizontalArrangement=Arrangement.SpaceBetween
+                                            ){
+                                                Text(
+                                                    s.symbol?:"در حال تکمیل نام",
+                                                    fontWeight=FontWeight.Bold,
+                                                    fontSize=16.sp
+                                                )
+                                                Text(
+                                                    "${fa(s.score.toInt())}/۱۰۰",
+                                                    color=MaterialTheme.colorScheme.primary,
+                                                    fontWeight=FontWeight.Black
+                                                )
+                                            }
+                                            Text(
+                                                "هشدار ${fmtTime(s.signalTime)}  •  صف ${fmtTime(s.eventTime)}",
+                                                fontSize=11.sp,
+                                                color=Color(0xFF727583)
+                                            )
+                                            Text(
+                                                when(s.nextDayQueueStatus){
+                                                    "QUEUE_AGAIN" -> "روز بعد هم صف خرید ماند ✓"
+                                                    "NOT_QUEUE_NEXT_DAY" -> "روز بعد صف خرید نماند"
+                                                    "NO_NEXT_DAY" -> "داده روز معاملاتی بعد موجود نیست"
+                                                    else -> "روز بعد هنوز بررسی نشده"
+                                                },
+                                                fontSize=11.sp,
+                                                color=when(s.nextDayQueueStatus){
+                                                    "QUEUE_AGAIN" -> Color(0xFF118658)
+                                                    "NOT_QUEUE_NEXT_DAY" -> Color(0xFFB85A5A)
+                                                    else -> Color(0xFF777A87)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -581,63 +665,204 @@ class MainActivity:ComponentActivity(){
 
     @Composable
     private fun DataExtractionPage(
+        eligibleCount:Int,
         syncStatus:String,syncDone:Int,syncTotal:Int,metadataStatus:String,
         onMarkets:()->Unit,onNames:()->Unit,
         onStart:(String,Int)->Unit,onAnalyze:()->Unit,onNextDay:()->Unit
     ){
         var symbolsText by remember{mutableStateOf("")}
         var years by remember{mutableIntStateOf(5)}
+        var showConfirm by remember{mutableStateOf(false)}
+
         LazyColumn(
-            verticalArrangement=Arrangement.spacedBy(10.dp),
-            contentPadding=PaddingValues(vertical=10.dp)
+            verticalArrangement=Arrangement.spacedBy(12.dp),
+            contentPadding=PaddingValues(top=12.dp,bottom=18.dp)
         ){
             item{
-                Card(shape=RoundedCornerShape(22.dp)){
-                    Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
-                        Text("استخراج داده",fontSize=22.sp,fontWeight=FontWeight.Black)
-                        Text("قبل از شروع، بازارها یا نمادهای موردنظر را انتخاب کن. اختیار معامله به‌طور کامل حذف شده است.",fontSize=12.sp)
-                        Button(onClick=onMarkets,modifier=Modifier.fillMaxWidth()){Text("انتخاب بازار و نوع اوراق")}
-                        OutlinedTextField(
-                            value=symbolsText,onValueChange={symbolsText=it},
-                            modifier=Modifier.fillMaxWidth(),
-                            label={Text("نمادهای خاص (اختیاری)")},
-                            supportingText={Text("مثال: وبملت، خودرو، شستا — خالی = همه نمادهای انتخاب‌شده")}
-                        )
-                        Text("بازه تاریخی")
-                        Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                            (1..5).forEach{y->
-                                FilterChip(
-                                    selected=years==y,onClick={years=y},
-                                    label={Text("$y سال")}
-                                )
-                            }
-                        }
-                        Button(onClick={onStart(symbolsText,years)},modifier=Modifier.fillMaxWidth()){
-                            Text("شروع استخراج")
-                        }
-                    }
-                }
-            }
-            item{ProcessCard("دریافت تاریخچه",syncStatus,syncDone,syncTotal)}
-            item{
-                Card(shape=RoundedCornerShape(18.dp)){
-                    Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
-                        Text("نام نمادها",fontWeight=FontWeight.Bold)
-                        Text(metadataStatus,fontSize=12.sp)
-                        FilledTonalButton(onClick=onNames,modifier=Modifier.fillMaxWidth()){
-                            Text("ترمیم فقط نام‌های ناقص")
-                        }
-                    }
-                }
-            }
-            item{FilledTonalButton(onClick=onAnalyze,modifier=Modifier.fillMaxWidth()){Text("تحلیل دیتاست تاریخی")}}
-            item{FilledTonalButton(onClick=onNextDay,modifier=Modifier.fillMaxWidth()){Text("بررسی ماندگاری صف روز بعد")}}
-            item{
-                Text(
-                    "هدف این نسخه: تاریخچه تا ۵ سال. داده‌هایی که منبع عمومی ارائه کند ذخیره می‌شوند؛ داده‌های غیرعمومی یا هویت اشخاص قابل استخراج نیست.",
-                    fontSize=11.sp,color=Color.Gray
+                PageHero(
+                    eyebrow="DATASET",
+                    title="استخراج داده",
+                    subtitle="فقط سهام بورس، فرابورس، بازار پایه و صندوق‌های اهرمی"
                 )
             }
+
+            item{
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement=Arrangement.spacedBy(8.dp)
+                ){
+                    SummaryTile(
+                        title="Universe نهایی",
+                        value=fa(eligibleCount),
+                        bg=Color(0xFFE9F7F3),
+                        modifier=Modifier.weight(1f)
+                    )
+                    SummaryTile(
+                        title="رکورد ذخیره‌شده",
+                        value=if(syncDone>0) fa(syncDone) else "—",
+                        bg=Color(0xFFEEF2FF),
+                        modifier=Modifier.weight(1f)
+                    )
+                    SummaryTile(
+                        title="بازه انتخابی",
+                        value="${fa(years)} سال",
+                        bg=Color(0xFFF2ECFF),
+                        modifier=Modifier.weight(1f)
+                    )
+                }
+            }
+
+            item{
+                PolishedCard{
+                    Text("۱. محدوده بازار",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    Text(
+                        "گروه‌های نامرتبط حذف شده‌اند و در شمارش Universe هم وارد نمی‌شوند.",
+                        fontSize=11.sp,color=Color(0xFF747785)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick=onMarkets,
+                        modifier=Modifier.fillMaxWidth(),
+                        shape=RoundedCornerShape(14.dp)
+                    ){
+                        Text("انتخاب بورس / فرابورس / بازار پایه / اهرمی")
+                    }
+                }
+            }
+
+            item{
+                PolishedCard{
+                    Text("۲. نمادهای خاص",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value=symbolsText,
+                        onValueChange={symbolsText=it},
+                        modifier=Modifier.fillMaxWidth(),
+                        shape=RoundedCornerShape(16.dp),
+                        singleLine=false,
+                        minLines=2,
+                        label={Text("اختیاری")},
+                        placeholder={Text("مثال: وبملت، خودرو، شستا")}
+                    )
+                    Text(
+                        "اگر خالی باشد، همه نمادهای Universe انتخاب‌شده استخراج می‌شوند.",
+                        fontSize=10.sp,color=Color(0xFF858894)
+                    )
+                }
+            }
+
+            item{
+                PolishedCard{
+                    Text("۳. بازه تاریخی",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(6.dp)
+                    ){
+                        (1..5).forEach{y->
+                            FilterChip(
+                                selected=years==y,
+                                onClick={years=y},
+                                label={Text("${fa(y)} سال",fontSize=10.sp)},
+                                modifier=Modifier.weight(1f),
+                                colors=FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor=MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor=Color.White,
+                                    containerColor=Color(0xFFF7F7FA)
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            item{
+                Button(
+                    onClick={showConfirm=true},
+                    modifier=Modifier.fillMaxWidth().height(52.dp),
+                    shape=RoundedCornerShape(16.dp)
+                ){
+                    Text("بررسی و شروع استخراج",fontWeight=FontWeight.Bold)
+                }
+            }
+
+            item{
+                ProcessCard("وضعیت استخراج",syncStatus,syncDone,syncTotal)
+            }
+
+            item{
+                PolishedCard{
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.SpaceBetween,
+                        verticalAlignment=Alignment.CenterVertically
+                    ){
+                        Column(Modifier.weight(1f)){
+                            Text("نام نمادها",fontWeight=FontWeight.Bold)
+                            Text(metadataStatus,fontSize=11.sp,color=Color(0xFF747785))
+                        }
+                        TextButton(onClick=onNames){
+                            Text("بررسی ناقص‌ها")
+                        }
+                    }
+                    Text(
+                        "نام‌های موجود دوباره دانلود نمی‌شوند؛ فقط نمادهای جدید یا رکوردهای ناقص ترمیم می‌شوند.",
+                        fontSize=10.sp,color=Color(0xFF8B8D98)
+                    )
+                }
+            }
+
+            item{
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement=Arrangement.spacedBy(8.dp)
+                ){
+                    FilledTonalButton(
+                        onClick=onAnalyze,
+                        modifier=Modifier.weight(1f),
+                        shape=RoundedCornerShape(14.dp)
+                    ){Text("تحلیل تاریخی",fontSize=11.sp)}
+                    FilledTonalButton(
+                        onClick=onNextDay,
+                        modifier=Modifier.weight(1f),
+                        shape=RoundedCornerShape(14.dp)
+                    ){Text("صف روز بعد",fontSize=11.sp)}
+                }
+            }
+        }
+
+        if(showConfirm){
+            AlertDialog(
+                onDismissRequest={showConfirm=false},
+                shape=RoundedCornerShape(24.dp),
+                title={Text("تایید شروع استخراج",fontWeight=FontWeight.Black)},
+                text={
+                    Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                        Text("Universe فعلی: ${fa(eligibleCount)} نماد")
+                        Text("بازه: ${fa(years)} سال")
+                        Text(
+                            if(symbolsText.isBlank())
+                                "نماد خاصی وارد نشده؛ همه Universe انتخاب‌شده بررسی می‌شود."
+                            else "نمادهای انتخابی: $symbolsText",
+                            fontSize=12.sp,color=Color(0xFF666977)
+                        )
+                        Text(
+                            "تا زمانی که «تایید و شروع» را نزنی هیچ Worker استخراجی اجرا نمی‌شود.",
+                            fontSize=11.sp,color=MaterialTheme.colorScheme.primary,
+                            fontWeight=FontWeight.Bold
+                        )
+                    }
+                },
+                confirmButton={
+                    Button(onClick={
+                        showConfirm=false
+                        onStart(symbolsText,years)
+                    }){Text("تایید و شروع")}
+                },
+                dismissButton={
+                    TextButton(onClick={showConfirm=false}){Text("انصراف")}
+                }
+            )
         }
     }
 
@@ -779,31 +1004,81 @@ class MainActivity:ComponentActivity(){
 
     @Composable
     private fun PaperTrades(items:List<PaperTradeEntity>){
-        if(items.isEmpty()){
-            Empty("Paper Trading هنوز معامله‌ای ثبت نکرده؛ ورود فرضی از امتیاز ۸۲ به بالا انجام می‌شود.")
-            return
-        }
         LazyColumn(
-            verticalArrangement=Arrangement.spacedBy(8.dp),
-            contentPadding=PaddingValues(vertical=10.dp)
+            verticalArrangement=Arrangement.spacedBy(12.dp),
+            contentPadding=PaddingValues(top=12.dp,bottom=18.dp)
         ){
-            items(items){t->
-                Card(shape=RoundedCornerShape(18.dp)){
-                    Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
-                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                            Text(t.symbol?:"نماد",fontWeight=FontWeight.Bold,fontSize=18.sp)
-                            Text(if(t.status=="OPEN") "باز" else "بسته",color=MaterialTheme.colorScheme.primary)
+            item{
+                PageHero(
+                    eyebrow="PAPER",
+                    title="پیپر تریدینگ",
+                    subtitle="آزمایش استراتژی بدون پول واقعی"
+                )
+            }
+
+            if(items.isEmpty()){
+                item{
+                    PolishedEmpty("هنوز معامله آزمایشی ثبت نشده است. سیگنال‌های قوی بعداً می‌توانند اینجا وارد Paper Trading شوند.")
+                }
+            }else{
+                items(items){t->
+                    val open=t.status=="OPEN"
+                    Card(
+                        shape=RoundedCornerShape(20.dp),
+                        colors=CardDefaults.cardColors(containerColor=Color.White),
+                        border=BorderStroke(1.dp,Color(0xFFE5E7EE))
+                    ){
+                        Column(
+                            Modifier.padding(15.dp),
+                            verticalArrangement=Arrangement.spacedBy(8.dp)
+                        ){
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement=Arrangement.SpaceBetween,
+                                verticalAlignment=Alignment.CenterVertically
+                            ){
+                                Text(
+                                    t.symbol?:"نماد",
+                                    fontSize=18.sp,
+                                    fontWeight=FontWeight.Black
+                                )
+                                Surface(
+                                    color=if(open) Color(0xFFE3F6EA) else Color(0xFFF0F1F5),
+                                    shape=RoundedCornerShape(10.dp)
+                                ){
+                                    Text(
+                                        if(open)"باز" else "بسته",
+                                        Modifier.padding(horizontal=10.dp,vertical=5.dp),
+                                        color=if(open) Color(0xFF118658) else Color(0xFF6D707D),
+                                        fontSize=11.sp,
+                                        fontWeight=FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement=Arrangement.spacedBy(8.dp)
+                            ){
+                                MetricPill("ورود",faPrice(t.entryPrice),Modifier.weight(1f))
+                                MetricPill("فعلی/خروج",faPrice(t.currentPrice),Modifier.weight(1f))
+                                MetricPill(
+                                    "بازده",
+                                    Jalali.digits(String.format(Locale.US,"%.2f%%",t.pnlPct)),
+                                    Modifier.weight(1f)
+                                )
+                            }
+                            Text(
+                                "امتیاز ورود ${fa(t.entryScore.toInt())}/۱۰۰",
+                                fontSize=11.sp,
+                                color=Color(0xFF777A86)
+                            )
                         }
-                        Text("ورود فرضی: ${faPrice(t.entryPrice)}")
-                        Text("قیمت فعلی/خروج: ${faPrice(t.currentPrice)}")
-                        Text("بازده فرضی: ${Jalali.digits(String.format(Locale.US,"%.2f%%",t.pnlPct))}")
-                        Text("امتیاز ورود: ${fa(t.entryScore.toInt())}/۱۰۰")
                     }
                 }
             }
         }
     }
-
 
     @Composable
     private fun SymbolSearchPage(
@@ -813,59 +1088,92 @@ class MainActivity:ComponentActivity(){
     ){
         if(selected!=null){
             LazyColumn(
-                verticalArrangement=Arrangement.spacedBy(8.dp),
-                contentPadding=PaddingValues(vertical=10.dp)
+                verticalArrangement=Arrangement.spacedBy(12.dp),
+                contentPadding=PaddingValues(top=12.dp,bottom=18.dp)
             ){
                 item{
-                    Card(shape=RoundedCornerShape(20.dp)){
-                        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
-                            Text(selected.symbol?:selected.name?:"نماد",fontSize=22.sp,fontWeight=FontWeight.Black)
-                            if(!selected.name.isNullOrBlank() && selected.name!=selected.symbol){
-                                Text(selected.name!!,fontSize=12.sp,color=Color.Gray)
-                            }
-                            Text("تاریخچه زمان‌های هشدار الگو",fontSize=13.sp,fontWeight=FontWeight.Bold)
-                            Text(
-                                "رکورد تاریخی: ${fa(stats?.recordCount ?: 0)}",
-                                fontSize=12.sp
-                            )
-                            if(stats?.firstDate!=null && stats.lastDate!=null){
-                                Text(
-                                    "بازه داده: ${Jalali.fromGregorianInt(stats.firstDate)} تا ${Jalali.fromGregorianInt(stats.lastDate)}",
-                                    fontSize=11.sp,color=Color.Gray
-                                )
-                            }
-                        }
+                    PageHero(
+                        eyebrow="SYMBOL",
+                        title=selected.symbol?:selected.name?:"نماد",
+                        subtitle=selected.name?.takeIf{it!=selected.symbol} ?: "جزئیات تاریخی نماد"
+                    )
+                }
+
+                item{
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(8.dp)
+                    ){
+                        SummaryTile(
+                            title="رکورد تاریخی",
+                            value=fa(stats?.recordCount ?: 0),
+                            bg=Color(0xFFEAF2FF),
+                            modifier=Modifier.weight(1f)
+                        )
+                        SummaryTile(
+                            title="اولین داده",
+                            value=stats?.firstDate?.let{Jalali.fromGregorianInt(it)} ?: "—",
+                            bg=Color(0xFFF2ECFF),
+                            modifier=Modifier.weight(1f)
+                        )
+                        SummaryTile(
+                            title="آخرین داده",
+                            value=stats?.lastDate?.let{Jalali.fromGregorianInt(it)} ?: "—",
+                            bg=Color(0xFFE9F7F3),
+                            modifier=Modifier.weight(1f)
+                        )
                     }
                 }
 
                 if(signals.isEmpty()){
                     item{
-                        Card(shape=RoundedCornerShape(18.dp)){
-                            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
-                                Text("هنوز سیگنال تاریخی ثبت نشده",fontWeight=FontWeight.Bold)
-                                Text(
-                                    "برای این نماد هنوز رخداد قابل نمایش در دیتاست تحلیل‌شده وجود ندارد. بعد از تکمیل استخراج و تحلیل تاریخی، زمان‌های هشدار اینجا ظاهر می‌شوند.",
-                                    fontSize=12.sp,
-                                    color=Color.Gray
-                                )
-                            }
-                        }
+                        PolishedEmpty(
+                            "هنوز سیگنال تاریخی ثبت نشده. بعد از استخراج و تحلیل داده‌های همین نماد، زمان‌های هشدار اینجا نمایش داده می‌شوند."
+                        )
                     }
                 }else{
                     items(signals){s->
-                        Card(shape=RoundedCornerShape(16.dp)){
-                            Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(3.dp)){
-                                Text(Jalali.fromGregorianInt(s.date),fontWeight=FontWeight.Bold)
-                                Text("هشدار: ${fmtTime(s.signalTime)}  •  صف/رخداد: ${fmtTime(s.eventTime)}")
-                                Text("امتیاز: ${fa(s.score.toInt())}/۱۰۰")
+                        Card(
+                            shape=RoundedCornerShape(18.dp),
+                            colors=CardDefaults.cardColors(containerColor=Color.White),
+                            border=BorderStroke(1.dp,Color(0xFFE6E8EF))
+                        ){
+                            Column(
+                                Modifier.padding(14.dp),
+                                verticalArrangement=Arrangement.spacedBy(5.dp)
+                            ){
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement=Arrangement.SpaceBetween
+                                ){
+                                    Text(
+                                        Jalali.fromGregorianInt(s.date),
+                                        fontWeight=FontWeight.Black
+                                    )
+                                    Text(
+                                        "${fa(s.score.toInt())}/۱۰۰",
+                                        color=MaterialTheme.colorScheme.primary,
+                                        fontWeight=FontWeight.Black
+                                    )
+                                }
+                                Text(
+                                    "هشدار ${fmtTime(s.signalTime)}  •  صف/رخداد ${fmtTime(s.eventTime)}",
+                                    fontSize=11.sp,
+                                    color=Color(0xFF737684)
+                                )
                                 Text(
                                     when(s.nextDayQueueStatus){
-                                        "QUEUE_AGAIN"->"روز بعد: صف خرید ماند ✅"
-                                        "NOT_QUEUE_NEXT_DAY"->"روز بعد: صف نماند"
-                                        "NO_NEXT_DAY"->"روز بعد: داده موجود نیست"
-                                        else->"روز بعد: بررسی نشده"
+                                        "QUEUE_AGAIN"->"روز بعد هم صف خرید ماند ✓"
+                                        "NOT_QUEUE_NEXT_DAY"->"روز بعد صف نماند"
+                                        "NO_NEXT_DAY"->"داده روز بعد موجود نیست"
+                                        else->"روز بعد هنوز بررسی نشده"
                                     },
-                                    color=MaterialTheme.colorScheme.primary
+                                    fontSize=11.sp,
+                                    color=when(s.nextDayQueueStatus){
+                                        "QUEUE_AGAIN"->Color(0xFF118658)
+                                        "NOT_QUEUE_NEXT_DAY"->Color(0xFFB85A5A)
+                                        else->Color(0xFF777A86)
+                                    }
                                 )
                             }
                         }
@@ -874,13 +1182,40 @@ class MainActivity:ComponentActivity(){
             }
             return
         }
-        LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp),contentPadding=PaddingValues(vertical=10.dp)){
-            item{OutlinedTextField(value=query,onValueChange=onQuery,modifier=Modifier.fillMaxWidth(),
-                singleLine=true,label={Text("جستجوی نماد")})}
+
+        LazyColumn(
+            verticalArrangement=Arrangement.spacedBy(10.dp),
+            contentPadding=PaddingValues(top=12.dp,bottom=18.dp)
+        ){
+            item{
+                PageHero(
+                    eyebrow="SEARCH",
+                    title="جستجوی نماد",
+                    subtitle="نام نماد را پیدا کن و سابقه سیگنال‌هایش را ببین"
+                )
+            }
+            item{
+                OutlinedTextField(
+                    value=query,
+                    onValueChange=onQuery,
+                    modifier=Modifier.fillMaxWidth(),
+                    shape=RoundedCornerShape(18.dp),
+                    singleLine=true,
+                    label={Text("نام نماد")},
+                    placeholder={Text("مثال: وبملت")}
+                )
+            }
+
+            if(query.isNotBlank() && results.isEmpty()){
+                item{PolishedEmpty("نمادی با این عبارت پیدا نشد.")}
+            }
+
             items(results){s->
                 Card(
                     modifier=Modifier.fillMaxWidth().clickable{onSelect(s)},
-                    shape=RoundedCornerShape(16.dp)
+                    shape=RoundedCornerShape(18.dp),
+                    colors=CardDefaults.cardColors(containerColor=Color.White),
+                    border=BorderStroke(1.dp,Color(0xFFE6E8EF))
                 ){
                     Row(
                         Modifier.fillMaxWidth().padding(14.dp),
@@ -888,13 +1223,26 @@ class MainActivity:ComponentActivity(){
                         verticalAlignment=Alignment.CenterVertically
                     ){
                         Column(Modifier.weight(1f)){
-                            Text(s.symbol?:s.name?:"نماد",fontWeight=FontWeight.Bold,fontSize=18.sp)
-                            if(!s.name.isNullOrBlank()&&s.name!=s.symbol){
-                                Text(s.name!!,fontSize=11.sp,color=Color.Gray)
+                            Text(
+                                s.symbol?:s.name?:"نماد",
+                                fontWeight=FontWeight.Black,
+                                fontSize=17.sp
+                            )
+                            if(!s.name.isNullOrBlank() && s.name!=s.symbol){
+                                Text(s.name!!,fontSize=11.sp,color=Color(0xFF777A86))
                             }
                         }
-                        TextButton(onClick={onSelect(s)}){
-                            Text("جزئیات")
+                        Surface(
+                            color=Color(0xFFF0EBFF),
+                            shape=RoundedCornerShape(12.dp)
+                        ){
+                            Text(
+                                "جزئیات",
+                                Modifier.padding(horizontal=10.dp,vertical=6.dp),
+                                color=MaterialTheme.colorScheme.primary,
+                                fontSize=11.sp,
+                                fontWeight=FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -935,17 +1283,112 @@ class MainActivity:ComponentActivity(){
     }
 
     @Composable
+    private fun PageHero(eyebrow:String,title:String,subtitle:String){
+        Card(
+            shape=RoundedCornerShape(24.dp),
+            colors=CardDefaults.cardColors(containerColor=Color(0xFF211B37))
+        ){
+            Column(
+                Modifier.fillMaxWidth().padding(18.dp),
+                verticalArrangement=Arrangement.spacedBy(5.dp)
+            ){
+                Text(
+                    eyebrow,
+                    fontSize=10.sp,
+                    fontWeight=FontWeight.Bold,
+                    color=Color(0xFFBCAEFF)
+                )
+                Text(
+                    title,
+                    fontSize=23.sp,
+                    fontWeight=FontWeight.Black,
+                    color=Color.White
+                )
+                Text(
+                    subtitle,
+                    fontSize=11.sp,
+                    color=Color(0xFFD5D0E4)
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun PolishedCard(content:@Composable ColumnScope.()->Unit){
+        Card(
+            shape=RoundedCornerShape(20.dp),
+            colors=CardDefaults.cardColors(containerColor=Color.White),
+            border=BorderStroke(1.dp,Color(0xFFE5E7EE))
+        ){
+            Column(
+                Modifier.fillMaxWidth().padding(15.dp),
+                verticalArrangement=Arrangement.spacedBy(6.dp),
+                content=content
+            )
+        }
+    }
+
+    @Composable
+    private fun PolishedEmpty(text:String){
+        Card(
+            shape=RoundedCornerShape(20.dp),
+            colors=CardDefaults.cardColors(containerColor=Color.White),
+            border=BorderStroke(1.dp,Color(0xFFE6E8EF))
+        ){
+            Text(
+                text,
+                Modifier.fillMaxWidth().padding(22.dp),
+                textAlign=TextAlign.Center,
+                fontSize=12.sp,
+                color=Color(0xFF7A7D89)
+            )
+        }
+    }
+
+    @Composable
+    private fun MetricPill(title:String,value:String,modifier:Modifier=Modifier){
+        Surface(
+            modifier=modifier,
+            color=Color(0xFFF7F8FB),
+            shape=RoundedCornerShape(14.dp)
+        ){
+            Column(
+                Modifier.padding(horizontal=8.dp,vertical=9.dp),
+                horizontalAlignment=Alignment.CenterHorizontally
+            ){
+                Text(title,fontSize=9.sp,color=Color(0xFF858793))
+                Text(value,fontSize=12.sp,fontWeight=FontWeight.Bold)
+            }
+        }
+    }
+
+    @Composable
     private fun ProcessCard(title:String,status:String,done:Int,total:Int){
-        Card(shape=RoundedCornerShape(18.dp)){
-            Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
-                Text(title,fontWeight=FontWeight.Bold)
-                Text(status,fontSize=12.sp)
+        Card(
+            shape=RoundedCornerShape(20.dp),
+            colors=CardDefaults.cardColors(containerColor=Color.White),
+            border=BorderStroke(1.dp,Color(0xFFE5E7EE))
+        ){
+            Column(
+                Modifier.padding(15.dp),
+                verticalArrangement=Arrangement.spacedBy(8.dp)
+            ){
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement=Arrangement.SpaceBetween
+                ){
+                    Text(title,fontWeight=FontWeight.Bold)
+                    if(total>0){
+                        Text("${fa(done)} / ${fa(total)}",fontSize=11.sp,color=Color(0xFF777A86))
+                    }
+                }
+                Text(status,fontSize=11.sp,color=Color(0xFF6F7280))
                 if(total>0 && done<total){
                     LinearProgressIndicator(
                         progress={done.toFloat()/total.toFloat()},
-                        modifier=Modifier.fillMaxWidth()
+                        modifier=Modifier.fillMaxWidth().height(7.dp),
+                        trackColor=Color(0xFFEDEEF3)
                     )
-                    Text("${fa(done)} از ${fa(total)}",fontSize=12.sp)
                 }
             }
         }
@@ -1008,88 +1451,105 @@ class MainActivity:ComponentActivity(){
         onDismiss:()->Unit,
         onSave:(Set<String>,Set<String>)->Unit
     ){
-        var selectedTypes by remember{mutableStateOf(initialTypes)}
-        var selectedSegments by remember{mutableStateOf(initialSegments)}
-
-        val rows=listOf(
-            listOf(MarketPrefs.TYPE_STOCK,MarketPrefs.TYPE_BASE),
-            listOf(MarketPrefs.TYPE_FUND)
-        )
+        var selectedTypes by remember{mutableStateOf(initialTypes.intersect(MarketPrefs.allTypes))}
+        var selectedSegments by remember{mutableStateOf(initialSegments.intersect(MarketPrefs.allSegments))}
 
         AlertDialog(
             onDismissRequest=onDismiss,
-            title={Text("نوع اوراق")},
-            text={
-                Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
-                    rows.forEach{row->
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement=Arrangement.spacedBy(6.dp)
-                        ){
-                            row.forEach{type->
-                                FilterChip(
-                                    selected=selectedTypes.contains(type),
-                                    onClick={
-                                        selectedTypes=
-                                            if(selectedTypes.contains(type)) selectedTypes-type
-                                            else selectedTypes+type
-                                    },
-                                    label={Text(MarketPrefs.typeLabel(type),fontSize=11.sp)},
-                                    modifier=Modifier.weight(1f)
-                                )
-                            }
-                            if(row.size==1) Spacer(Modifier.weight(1f))
-                        }
-                    }
-
-                    if(selectedTypes.contains(MarketPrefs.TYPE_BASE)){
-                        HorizontalDivider()
-                        Text("جزئیات بازار پایه",fontWeight=FontWeight.Bold,fontSize=12.sp)
-
-                        listOf(
-                            MarketPrefs.BASE_YELLOW,
-                            MarketPrefs.BASE_ORANGE,
-                            MarketPrefs.BASE_RED
-                        ).forEach{seg->
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                verticalAlignment=Alignment.CenterVertically
-                            ){
-                                Checkbox(
-                                    checked=selectedSegments.contains(seg),
-                                    onCheckedChange={on->
-                                        selectedSegments=
-                                            if(on) selectedSegments+seg
-                                            else selectedSegments-seg
-                                    }
-                                )
-                                Text(MarketPrefs.label(seg))
-                            }
-                        }
-                    }
-
+            shape=RoundedCornerShape(26.dp),
+            containerColor=Color.White,
+            title={
+                Column{
+                    Text("محدوده استخراج",fontWeight=FontWeight.Black,fontSize=20.sp)
                     Text(
-                        "این فیلتر روی دریافت داده، تحلیل تاریخی، اسکن زنده و Paper Trading اعمال می‌شود.",
-                        fontSize=10.sp,
-                        color=Color.Gray
+                        "فقط ابزارهای سازگار با مدل Signal",
+                        fontSize=11.sp,
+                        color=Color(0xFF777A86)
                     )
                 }
             },
-            confirmButton={
-                TextButton(
-                    onClick={
-                        if(selectedTypes.isNotEmpty()){
-                            onSave(selectedTypes,selectedSegments)
+            text={
+                Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
+                    Text("نوع ابزار",fontSize=12.sp,fontWeight=FontWeight.Bold)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(6.dp)
+                    ){
+                        listOf(
+                            MarketPrefs.TYPE_STOCK,
+                            MarketPrefs.TYPE_BASE,
+                            MarketPrefs.TYPE_FUND
+                        ).forEach{type->
+                            FilterChip(
+                                selected=selectedTypes.contains(type),
+                                onClick={
+                                    selectedTypes=
+                                        if(selectedTypes.contains(type)) selectedTypes-type
+                                        else selectedTypes+type
+                                },
+                                label={Text(MarketPrefs.typeLabel(type),fontSize=10.sp)},
+                                colors=FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor=MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor=Color.White
+                                )
+                            )
                         }
                     }
-                ){Text("ذخیره")}
+
+                    HorizontalDivider(color=Color(0xFFEDEEF2))
+                    Text("بازار",fontSize=12.sp,fontWeight=FontWeight.Bold)
+
+                    listOf(
+                        MarketPrefs.BOURSE,
+                        MarketPrefs.FARABOURSE,
+                        MarketPrefs.BASE_YELLOW,
+                        MarketPrefs.BASE_ORANGE,
+                        MarketPrefs.BASE_RED
+                    ).forEach{seg->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment=Alignment.CenterVertically
+                        ){
+                            Checkbox(
+                                checked=selectedSegments.contains(seg),
+                                onCheckedChange={on->
+                                    selectedSegments=
+                                        if(on) selectedSegments+seg else selectedSegments-seg
+                                }
+                            )
+                            Text(MarketPrefs.label(seg),fontSize=12.sp)
+                        }
+                    }
+
+                    Surface(
+                        color=Color(0xFFF5F2FF),
+                        shape=RoundedCornerShape(14.dp)
+                    ){
+                        Text(
+                            "تسهیلات مسکن، حق تقدم، اوراق بدهی، اختیار معامله، آتی، بورس کالا، انرژی و TAL در این مدل حذف شده‌اند.",
+                            Modifier.padding(10.dp),
+                            fontSize=10.sp,
+                            color=Color(0xFF625C76)
+                        )
+                    }
+                }
+            },
+            confirmButton={
+                Button(
+                    onClick={
+                        onSave(
+                            if(selectedTypes.isEmpty()) MarketPrefs.allTypes else selectedTypes,
+                            if(selectedSegments.isEmpty()) MarketPrefs.allSegments else selectedSegments
+                        )
+                    },
+                    shape=RoundedCornerShape(14.dp)
+                ){Text("ذخیره انتخاب‌ها")}
             },
             dismissButton={
                 TextButton(onClick=onDismiss){Text("انصراف")}
             }
         )
     }
-
 
     private fun saveExtractionSelection(raw:String,years:Int){
         val symbols=raw

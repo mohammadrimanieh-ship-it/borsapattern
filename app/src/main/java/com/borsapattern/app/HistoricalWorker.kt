@@ -15,6 +15,15 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     override suspend fun doWork():Result{
         val offset=inputData.getInt("offset",0)
         val batchSize=inputData.getInt("batchSize",35)
+        val confirmed=inputData.getBoolean("userConfirmed",false)
+
+        if(!confirmed){
+            prefs.edit()
+                .putBoolean("sync_running",false)
+                .putString("sync_status","منتظر تایید شما برای شروع استخراج")
+                .apply()
+            return Result.success()
+        }
 
         return try{
             // فقط اولین تکه، فهرست نمادها را تازه می‌کند.
@@ -25,6 +34,7 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     .apply()
 
                 val arr=api.jsonArrayFrom(api.marketWatchRaw(),"marketwatch","marketWatch")
+                val existing=dao.allSymbols().associateBy{it.insCode}
                 val fresh=mutableListOf<SymbolEntity>()
 
                 for(i in 0 until arr.length()){
@@ -32,21 +42,23 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     val ins=firstString(o,"insCode","instrumentId")?:continue
                     val rawSymbol=firstString(o,"lVal18AFC","symbol","instrumentName")
                     val rawName=firstString(o,"lVal30","name","companyName","companyNamePersian")
+                    val old=existing[ins]
+                    val clean=cleanSymbol(rawSymbol,ins)
+                    val resolvedSymbol=clean ?: old?.symbol
+                    val resolvedName=rawName?.trim()?.takeIf{it.isNotBlank()} ?: old?.name
+                    val flow=firstInt(o,"flow") ?: old?.flow
+                    val board=firstString(o,"cgrValCotTitle","boardTitle") ?: old?.boardTitle
                     fresh += SymbolEntity(
                         insCode=ins,
-                        symbol=cleanSymbol(rawSymbol,ins),
-                        name=rawName?.trim(),
-                        flow=firstInt(o,"flow"),
-                        segment=MarketPrefs.classify(
-                            firstInt(o,"flow"),
-                            firstString(o,"cgrValCotTitle","boardTitle")
-                        ),
-                        boardTitle=firstString(o,"cgrValCotTitle","boardTitle"),
+                        symbol=resolvedSymbol,
+                        name=resolvedName,
+                        flow=flow,
+                        segment=MarketPrefs.classify(flow,board).let{
+                            if(it==MarketPrefs.OTHER) old?.segment ?: it else it
+                        },
+                        boardTitle=board,
                         instrumentType=MarketPrefs.classifyType(
-                            cleanSymbol(rawSymbol,ins),
-                            rawName?.trim(),
-                            firstInt(o,"flow"),
-                            firstString(o,"cgrValCotTitle","boardTitle")
+                            resolvedSymbol,resolvedName,flow,board
                         )
                     )
                 }
@@ -59,16 +71,19 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             val requestedSymbols=extractPrefs.getStringSet("symbols",emptySet()) ?: emptySet()
             val years=extractPrefs.getInt("years",5).coerceIn(1,5)
             val symbols=dao.allSymbols().filter{
+                val effectiveType=MarketPrefs.classifyType(
+                    it.symbol,it.name,it.flow,it.boardTitle
+                )
                 val supportedType =
-                    it.instrumentType==MarketPrefs.TYPE_STOCK ||
-                    it.instrumentType==MarketPrefs.TYPE_BASE ||
+                    effectiveType==MarketPrefs.TYPE_STOCK ||
+                    effectiveType==MarketPrefs.TYPE_BASE ||
                     (
-                        it.instrumentType==MarketPrefs.TYPE_FUND &&
+                        effectiveType==MarketPrefs.TYPE_FUND &&
                         MarketPrefs.isLeveragedFund(it.symbol,it.name)
                     )
 
                 wantedSegments.contains(it.segment) &&
-                wantedTypes.contains(it.instrumentType) &&
+                wantedTypes.contains(effectiveType) &&
                 supportedType &&
                 (requestedSymbols.isEmpty() || requestedSymbols.contains(it.symbol))
             }
@@ -143,7 +158,8 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     .setConstraints(networkConstraint())
                     .setInputData(workDataOf(
                         "offset" to end,
-                        "batchSize" to batchSize
+                        "batchSize" to batchSize,
+                        "userConfirmed" to true
                     ))
                     .setInitialDelay(2,TimeUnit.SECONDS)
                     .build()
@@ -183,7 +199,11 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
         fun start(context:Context, replace:Boolean=false){
             val req=OneTimeWorkRequestBuilder<HistoricalWorker>()
                 .setConstraints(networkConstraint())
-                .setInputData(workDataOf("offset" to 0,"batchSize" to 35))
+                .setInputData(workDataOf(
+                    "offset" to 0,
+                    "batchSize" to 35,
+                    "userConfirmed" to true
+                ))
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(

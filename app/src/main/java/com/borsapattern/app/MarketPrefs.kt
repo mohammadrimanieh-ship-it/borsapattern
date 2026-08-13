@@ -11,7 +11,7 @@ object MarketPrefs {
     const val BASE_RED="BASE_RED"
     const val OTHER="OTHER"
 
-    val allSegments=setOf(BOURSE,FARABOURSE,BASE_YELLOW,BASE_ORANGE,BASE_RED,OTHER)
+    val allSegments=setOf(BOURSE,FARABOURSE,BASE_YELLOW,BASE_ORANGE,BASE_RED)
     val baseSegments=setOf(BASE_YELLOW,BASE_ORANGE,BASE_RED)
 
     // Instrument categories, matching the requested TSETMC-style layout
@@ -37,12 +37,16 @@ object MarketPrefs {
 
     fun selectedSegments(ctx:Context):Set<String>{
         val p=ctx.getSharedPreferences("market_filters",Context.MODE_PRIVATE)
-        return p.getStringSet("segments",null)?.toSet() ?: allSegments
+        val saved=p.getStringSet("segments",null)?.toSet()
+        val clean=saved?.intersect(allSegments) ?: allSegments
+        return if(clean.isEmpty()) allSegments else clean
     }
 
     fun selectedTypes(ctx:Context):Set<String>{
         val p=ctx.getSharedPreferences("market_filters",Context.MODE_PRIVATE)
-        return p.getStringSet("instrument_types",null)?.toSet() ?: allTypes
+        val saved=p.getStringSet("instrument_types",null)?.toSet()
+        val clean=saved?.intersect(allTypes) ?: allTypes
+        return if(clean.isEmpty()) allTypes else clean
     }
 
     fun save(ctx:Context,segments:Set<String>){
@@ -51,10 +55,12 @@ object MarketPrefs {
     }
 
     fun saveFilters(ctx:Context,types:Set<String>,segments:Set<String>){
+        val cleanTypes=types.intersect(allTypes)
+        val cleanSegments=segments.intersect(allSegments)
         ctx.getSharedPreferences("market_filters",Context.MODE_PRIVATE)
             .edit()
-            .putStringSet("instrument_types",types)
-            .putStringSet("segments",segments)
+            .putStringSet("instrument_types",if(cleanTypes.isEmpty()) allTypes else cleanTypes)
+            .putStringSet("segments",if(cleanSegments.isEmpty()) allSegments else cleanSegments)
             .apply()
     }
 

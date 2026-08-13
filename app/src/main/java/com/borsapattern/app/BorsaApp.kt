@@ -16,31 +16,59 @@ class BorsaApp:Application(){
             .addMigrations(MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6)
             .build()
         Notifications.createChannel(this)
+
+        val appPrefs=getSharedPreferences("app_state",MODE_PRIVATE)
+        if(!appPrefs.getBoolean("v18_worker_reset_done",false)){
+            val wm=WorkManager.getInstance(this)
+            wm.cancelUniqueWork(HistoricalWorker.HISTORY_CHAIN)
+            wm.cancelUniqueWork("daily_incremental_sync_kickoff")
+            wm.cancelUniqueWork("historical_queue_analysis")
+            getSharedPreferences("sync",MODE_PRIVATE).edit()
+                .putBoolean("sync_running",false)
+                .putInt("sync_done",0)
+                .putInt("sync_total",0)
+                .putString("sync_status","آماده؛ برای استخراج انتخاب‌ها را تایید کنید")
+                .apply()
+
+            // One-time repair only for genuinely missing symbol names.
+            val nameRepair=OneTimeWorkRequestBuilder<MetadataWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInputData(workDataOf("batch" to 30))
+                .build()
+            wm.enqueueUniqueWork(
+                MetadataWorker.CHAIN,
+                ExistingWorkPolicy.KEEP,
+                nameRepair
+            )
+
+            appPrefs.edit().putBoolean("v18_worker_reset_done",true).apply()
+        }
+
         scheduleBackgroundWork()
     }
 
     private fun scheduleBackgroundWork(){
+        val wm=WorkManager.getInstance(this)
+
+        // Extraction and historical analysis are user-controlled only.
+        // Cancel legacy periodic jobs left by older versions.
+        wm.cancelUniqueWork("daily_incremental_sync_kickoff")
+        wm.cancelUniqueWork("historical_queue_analysis")
+
+        // Keep only lightweight live monitoring; it respects the 09:00-12:30 window.
         val net=HistoricalWorker.networkConstraint()
-
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "daily_incremental_sync_kickoff",ExistingPeriodicWorkPolicy.UPDATE,
-            PeriodicWorkRequestBuilder<SyncKickoffWorker>(12,TimeUnit.HOURS)
-                .setConstraints(net).build()
-        )
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "historical_queue_analysis",ExistingPeriodicWorkPolicy.UPDATE,
-            PeriodicWorkRequestBuilder<QueueAnalysisWorker>(1,TimeUnit.HOURS)
-                .setConstraints(net).build()
-        )
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "live_monitor",ExistingPeriodicWorkPolicy.UPDATE,
+        wm.enqueueUniquePeriodicWork(
+            "live_monitor",
+            ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<LiveWorker>(15,TimeUnit.MINUTES)
-                .setConstraints(net).build()
+                .setConstraints(net)
+                .build()
         )
 
-        WorkManager.getInstance(this).enqueueUniqueWork(
+        // Local-only classification repair; no network extraction.
+        wm.enqueueUniqueWork(
             "category_repair",
-            ExistingWorkPolicy.REPLACE,
+            ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<CategoryRepairWorker>().build()
         )
     }
