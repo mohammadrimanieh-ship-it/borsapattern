@@ -125,10 +125,9 @@ class MainActivity:ComponentActivity(){
                             effectiveType==MarketPrefs.TYPE_FUND &&
                             MarketPrefs.isLeveragedFund(it.symbol,it.name)
                         )
-                    stockLike && (
-                        effectiveSegment!=MarketPrefs.OTHER ||
-                        MarketPrefs.selectedSegments(this@MainActivity).containsAll(MarketPrefs.allSegments)
-                    )
+                    stockLike &&
+                    effectiveSegment!=MarketPrefs.OTHER &&
+                    MarketPrefs.selectedSegments(this@MainActivity).contains(effectiveSegment)
                 }
                 candidates=app.db.dao().candidateCount()
                 confirmed=app.db.dao().confirmedCount()
@@ -226,7 +225,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.1-test",
+                                    "Signal • v2.2.1-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -428,7 +427,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.1-test",
+                        "v2.2.1-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -912,7 +911,7 @@ class MainActivity:ComponentActivity(){
                             shape=RoundedCornerShape(12.dp)
                         ){
                             Text(
-                                "${fa(unknownCount)} نماد سهام‌مانند هنوز بازار مشخص ندارند؛ در حالت انتخاب همه بازارها حذف نمی‌شوند.",
+                                "${fa(unknownCount)} نماد هنوز بازار مشخص ندارند و تا تکمیل متادیتا وارد Universe نمی‌شوند.",
                                 Modifier.fillMaxWidth().padding(9.dp),
                                 fontSize=10.sp,
                                 color=Color(0xFF7B6517)

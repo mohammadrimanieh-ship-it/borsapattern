@@ -48,10 +48,10 @@ class BorsaApp:Application(){
         val now=System.currentTimeMillis()
         val lastCatalog=catalogPrefs.getLong("last_refresh",0L)
         val appState=getSharedPreferences("app_state",MODE_PRIVATE)
-        val forceV21=!appState.getBoolean("v21_catalog_rebuild_done",false)
+        val forceV22=!appState.getBoolean("v22_catalog_rebuild_done",false)
 
-        if(forceV21 || now-lastCatalog > 12L*60L*60L*1000L){
-            if(forceV21){
+        if(forceV22 || now-lastCatalog > 12L*60L*60L*1000L){
+            if(forceV22){
                 catalogPrefs.edit()
                     .remove("eligible_count")
                     .remove("raw_count")
@@ -70,11 +70,11 @@ class BorsaApp:Application(){
                 .build()
             WorkManager.getInstance(this).enqueueUniqueWork(
                 SymbolCatalogWorker.CHAIN,
-                if(forceV21) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                if(forceV22) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
                 catalogReq
             )
-            if(forceV21){
-                appState.edit().putBoolean("v21_catalog_rebuild_done",true).apply()
+            if(forceV22){
+                appState.edit().putBoolean("v22_catalog_rebuild_done",true).apply()
             }
         }
 

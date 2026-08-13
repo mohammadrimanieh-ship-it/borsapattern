@@ -1,17 +1,35 @@
-<?xml version="1.0" encoding="utf-8"?>
-<data-extraction-rules>
-    <cloud-backup disableIfNoEncryptionCapabilities="true">
-        <exclude domain="root" path="."/>
-        <exclude domain="file" path="."/>
-        <exclude domain="database" path="."/>
-        <exclude domain="sharedpref" path="."/>
-        <exclude domain="external" path="."/>
-    </cloud-backup>
-    <device-transfer>
-        <exclude domain="root" path="."/>
-        <exclude domain="file" path="."/>
-        <exclude domain="database" path="."/>
-        <exclude domain="sharedpref" path="."/>
-        <exclude domain="external" path="."/>
-    </device-transfer>
-</data-extraction-rules>
+Signal v2.2-test
+
+اصلاح ساختاری Catalog / Search / Universe:
+
+1) دریافت نام و متادیتای نماد
+- JsonHelpers اکنون آبجکت‌های تو در توی پاسخ TSETMC را تا چند سطح بررسی می‌کند.
+- SymbolResolver فقط به نام اکتفا نمی‌کند؛ اگر flow/board/segment ناقص باشد InstrumentInfo را نیز بررسی می‌کند.
+- نام موجود با مقدار خالی overwrite نمی‌شود.
+
+2) تکمیل تدریجی Catalog
+- SymbolCatalogWorker ابتدا فهرست خام را ذخیره می‌کند.
+- سپس نمادهای ناقص با MetadataWorker در دسته‌های 50تایی تکمیل می‌شوند.
+- زنجیره تکمیل سقف تعداد مرحله دارد تا در صورت ناقص بودن منبع وارد حلقه بی‌نهایت نشود.
+- بعد از پایان تکمیل، Catalog دوباره شمارش می‌شود.
+
+3) Universe
+- UNKNOWN دیگر وارد Universe نهایی نمی‌شود.
+- Universe فقط از:
+  سهام بورس، سهام فرابورس، بازار پایه، صندوق‌های اهرمی
+  تشکیل می‌شود.
+- استخراج تاریخی نیز نمادهای با بازار نامشخص را قبول نمی‌کند.
+- تا وقتی Universe معتبر صفر باشد شروع استخراج غیرفعال می‌ماند.
+
+4) جستجو
+- جستجو بر اساس symbol، name و insCode انجام می‌شود.
+- با تکمیل Catalog، نمادهایی مثل وبملت باید در جستجو ظاهر شوند حتی قبل از استخراج تاریخی.
+
+5) UI و موارد قبلی
+- ناوبری پایین صفحه و RTL حفظ شده‌اند.
+- ساعت مدل 09:00 تا 12:30 حفظ شده است.
+- استخراج فقط بعد از تایید کاربر شروع می‌شود.
+- تنظیمات امنیتی Release حفظ شده‌اند.
+
+versionCode=27
+versionName=2.2-test

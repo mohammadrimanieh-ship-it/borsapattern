@@ -71,8 +71,6 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             val requestedSymbols=extractPrefs.getStringSet("symbols",emptySet()) ?: emptySet()
             val years=extractPrefs.getInt("years",5).coerceIn(1,5)
             val allStored=dao.allSymbols()
-            val allMarketsSelected=wantedSegments.containsAll(MarketPrefs.allSegments)
-
             val symbols=allStored.filter{
                 val effectiveType=MarketPrefs.classifyType(
                     it.symbol,it.name,it.flow,it.boardTitle
@@ -94,11 +92,8 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     )
 
                 val segmentAllowed =
-                    wantedSegments.contains(effectiveSegment) ||
-                    (
-                        effectiveSegment==MarketPrefs.OTHER &&
-                        allMarketsSelected
-                    )
+                    effectiveSegment!=MarketPrefs.OTHER &&
+                    wantedSegments.contains(effectiveSegment)
 
                 segmentAllowed &&
                 wantedTypes.contains(effectiveType) &&

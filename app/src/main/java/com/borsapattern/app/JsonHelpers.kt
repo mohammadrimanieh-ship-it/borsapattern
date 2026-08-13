@@ -2,19 +2,41 @@ package com.borsapattern.app
 
 import org.json.JSONObject
 
-fun firstString(o:JSONObject,vararg keys:String):String?{
-    for(k in keys){
-        if(o.has(k)&&!o.isNull(k)){
-            val v=o.optString(k,null)
-            if(!v.isNullOrBlank()) return v
+private fun nestedObjects(o:JSONObject,depth:Int=0):Sequence<JSONObject> = sequence {
+    if(depth>4) return@sequence
+    yield(o)
+
+    val preferred=listOf(
+        "instrument","closingPrice","instrumentInfo","instrumentState",
+        "marketWatch","data","result"
+    )
+    val seen=HashSet<String>()
+
+    for(k in preferred){
+        val n=o.optJSONObject(k)
+        if(n!=null){
+            seen+=k
+            yieldAll(nestedObjects(n,depth+1))
         }
     }
-    val nested=o.optJSONObject("instrument")
-    if(nested!=null){
+
+    val names=o.names()
+    if(names!=null){
+        for(i in 0 until names.length()){
+            val k=names.optString(i)
+            if(k in seen) continue
+            val n=o.optJSONObject(k)
+            if(n!=null) yieldAll(nestedObjects(n,depth+1))
+        }
+    }
+}
+
+fun firstString(o:JSONObject,vararg keys:String):String?{
+    for(obj in nestedObjects(o)){
         for(k in keys){
-            if(nested.has(k)&&!nested.isNull(k)){
-                val v=nested.optString(k,null)
-                if(!v.isNullOrBlank()) return v
+            if(obj.has(k) && !obj.isNull(k)){
+                val v=obj.optString(k,null)?.trim()
+                if(!v.isNullOrBlank() && v!="null") return v
             }
         }
     }
@@ -22,19 +44,30 @@ fun firstString(o:JSONObject,vararg keys:String):String?{
 }
 
 fun firstInt(o:JSONObject,vararg keys:String):Int?{
-    for(k in keys) if(o.has(k)&&!o.isNull(k)) return o.optInt(k)
-    val nested=o.optJSONObject("instrument")
-    if(nested!=null){
-        for(k in keys) if(nested.has(k)&&!nested.isNull(k)) return nested.optInt(k)
+    for(obj in nestedObjects(o)){
+        for(k in keys){
+            if(obj.has(k) && !obj.isNull(k)){
+                val raw=obj.opt(k)
+                when(raw){
+                    is Number -> return raw.toInt()
+                    is String -> raw.trim().toIntOrNull()?.let{return it}
+                }
+            }
+        }
     }
     return null
 }
 
 fun firstDouble(o:JSONObject,vararg keys:String):Double?{
-    for(k in keys){
-        if(o.has(k)&&!o.isNull(k)){
-            val v=o.optDouble(k,Double.NaN)
-            if(!v.isNaN()) return v
+    for(obj in nestedObjects(o)){
+        for(k in keys){
+            if(obj.has(k) && !obj.isNull(k)){
+                val raw=obj.opt(k)
+                when(raw){
+                    is Number -> return raw.toDouble()
+                    is String -> raw.trim().toDoubleOrNull()?.let{return it}
+                }
+            }
         }
     }
     return null
@@ -42,6 +75,6 @@ fun firstDouble(o:JSONObject,vararg keys:String):Double?{
 
 fun cleanSymbol(v:String?,insCode:String):String?{
     val s=v?.trim()
-    if(s.isNullOrBlank()||s==insCode||s.all{it.isDigit()}) return null
+    if(s.isNullOrBlank() || s==insCode || s.all{it.isDigit()}) return null
     return s
 }

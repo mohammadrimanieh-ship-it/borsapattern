@@ -11,22 +11,32 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     private val prefs get()=applicationContext.getSharedPreferences("metadata",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
-        val batch=inputData.getInt("batch",30)
-        val symbols=dao.unknownSymbols(batch)
+        val batch=inputData.getInt("batch",50).coerceIn(10,80)
+        val round=inputData.getInt("round",0)
+        val symbols=dao.symbolsNeedingMetadata(batch)
         val live=dao.liveScoresNeedingName(batch)
 
         if(symbols.isEmpty() && live.isEmpty()){
             dao.repairLiveScoreNames()
             prefs.edit()
-                .putString("status","نام نمادها کامل شد")
+                .putString("status","نام و بازار نمادها کامل شد")
                 .putBoolean("running",false)
                 .apply()
+
+            val catalog=OneTimeWorkRequestBuilder<SymbolCatalogWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                SymbolCatalogWorker.CHAIN,
+                ExistingWorkPolicy.REPLACE,
+                catalog
+            )
             return Result.success()
         }
 
         prefs.edit()
             .putBoolean("running",true)
-            .putString("status","در حال ترمیم نام نمادها")
+            .putString("status","در حال تکمیل نام و بازار نمادها")
             .apply()
 
         val codes=LinkedHashSet<String>()
@@ -49,15 +59,38 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
 
         dao.repairLiveScoreNames()
 
+        val remaining=dao.symbolsNeedingMetadata(1).isNotEmpty()
+        if(!remaining || round>=79){
+            dao.repairLiveScoreNames()
+            prefs.edit()
+                .putString(
+                    "status",
+                    if(remaining) "تکمیل متادیتا متوقف شد؛ بعضی نمادها از منبع بازار اطلاعات کافی ندارند"
+                    else "نام و بازار نمادها کامل شد"
+                )
+                .putBoolean("running",false)
+                .apply()
+
+            val catalog=OneTimeWorkRequestBuilder<SymbolCatalogWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                SymbolCatalogWorker.CHAIN,
+                ExistingWorkPolicy.REPLACE,
+                catalog
+            )
+            return Result.success()
+        }
+
         prefs.edit()
-            .putString("status","این مرحله $fixed نام اصلاح شد؛ ادامه در پس‌زمینه")
+            .putString("status","این مرحله $fixed نماد تکمیل شد؛ ادامه طبقه‌بندی در پس‌زمینه")
             .putBoolean("running",true)
             .apply()
 
         val next=OneTimeWorkRequestBuilder<MetadataWorker>()
             .setConstraints(HistoricalWorker.networkConstraint())
-            .setInputData(workDataOf("batch" to batch))
-            .setInitialDelay(3,TimeUnit.SECONDS)
+            .setInputData(workDataOf("batch" to batch,"round" to round+1))
+            .setInitialDelay(2,TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(applicationContext).enqueueUniqueWork(
             CHAIN,ExistingWorkPolicy.APPEND_OR_REPLACE,next

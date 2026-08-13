@@ -111,6 +111,19 @@ interface BorsaDao {
     suspend fun unknownSymbols(limit:Int):List<SymbolEntity>
 
     @Query("""
+      SELECT * FROM symbols
+      WHERE symbol IS NULL OR TRIM(symbol)='' OR symbol=insCode OR symbol GLOB '[0-9]*'
+         OR name IS NULL OR TRIM(name)=''
+         OR flow IS NULL
+         OR segment='OTHER'
+      ORDER BY
+        CASE WHEN symbol IS NULL OR TRIM(symbol)='' THEN 0 ELSE 1 END,
+        insCode
+      LIMIT :limit
+    """)
+    suspend fun symbolsNeedingMetadata(limit:Int):List<SymbolEntity>
+
+    @Query("""
       SELECT * FROM live_scores
       WHERE insCode NOT IN (SELECT insCode FROM symbols)
          OR symbol IS NULL OR TRIM(symbol)=''
@@ -246,7 +259,11 @@ interface BorsaDao {
 
     @Query("""
       SELECT * FROM symbols
-      WHERE (symbol LIKE '%' || :q || '%' OR name LIKE '%' || :q || '%')
+      WHERE (
+        symbol LIKE '%' || :q || '%'
+        OR name LIKE '%' || :q || '%'
+        OR insCode LIKE '%' || :q || '%'
+      )
       ORDER BY CASE WHEN symbol=:q THEN 0 ELSE 1 END, COALESCE(symbol,name)
       LIMIT :limit
     """)

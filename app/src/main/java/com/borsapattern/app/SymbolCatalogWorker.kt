@@ -112,9 +112,8 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 }
             }
 
-            // نماد stock-like با بازار نامشخص را حذف نکن؛
-            // وقتی کاربر «همه بازارها» را انتخاب کرده، در Universe قابل استفاده است.
-            val eligible=bourse+farabourse+base+leveraged+unknownStockLike
+            // بازار نامشخص فقط برای عیب‌یابی است و تا تکمیل متادیتا وارد Universe نمی‌شود.
+            val eligible=bourse+farabourse+base+leveraged
 
             prefs.edit()
                 .putBoolean("running",false)
@@ -129,9 +128,25 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .putInt("excluded_count",excluded)
                 .putString(
                     "status",
-                    "فهرست آماده شد: $eligible قابل تحلیل از ${all.size} نماد ذخیره‌شده"
+                    if(unknownStockLike>0)
+                        "فهرست خام آماده شد؛ $eligible معتبر و $unknownStockLike نیازمند تکمیل نام/بازار"
+                    else
+                        "فهرست آماده شد: $eligible نماد معتبر از ${all.size} رکورد"
                 )
                 .apply()
+
+            if(unknownStockLike>0 || dao.unknownSymbols(1).isNotEmpty()){
+                val enrich=androidx.work.OneTimeWorkRequestBuilder<MetadataWorker>()
+                    .setConstraints(HistoricalWorker.networkConstraint())
+                    .setInputData(androidx.work.workDataOf("batch" to 50))
+                    .build()
+                androidx.work.WorkManager.getInstance(applicationContext)
+                    .enqueueUniqueWork(
+                        MetadataWorker.CHAIN,
+                        androidx.work.ExistingWorkPolicy.REPLACE,
+                        enrich
+                    )
+            }
 
             Result.success()
         }catch(e:Exception){
