@@ -157,7 +157,7 @@ class MainActivity:ComponentActivity(){
                                 fontSize=13.sp
                             )
                             Text(
-                                "v1.3-test",
+                                "v1.3.1-test",
                                 color=Color.Gray,
                                 fontSize=11.sp,
                                 fontWeight=FontWeight.Bold
@@ -273,7 +273,7 @@ class MainActivity:ComponentActivity(){
                                     color=MaterialTheme.colorScheme.primary,
                                     fontWeight=FontWeight.Bold
                                 )
-                                Text("آخرین قیمت: ${fa(s.lastPrice.toLong())}",fontSize=11.sp)
+                                Text("آخرین قیمت: ${Jalali.digits(String.format(Locale.US,"%.0f",s.lastPrice))}",fontSize=11.sp)
                             }
                             ScoreBadge(s.score)
                         }
