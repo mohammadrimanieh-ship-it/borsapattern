@@ -86,6 +86,7 @@ object QueuePatternLearningEngine {
         val successRate=rate(success,total)
         val weightedSuccessRate=
             if(total>0) (weightedSuccess/total.toDouble()).coerceAtMost(1.0).toFloat()
+            else 0f
         val strongRate=rate(strongSuccess,total)
         val earlyRate=rate(earlySuccess,earlyTotal)
         val midRate=rate(midSuccess,midTotal)
