@@ -47,15 +47,35 @@ class BorsaApp:Application(){
         val catalogPrefs=getSharedPreferences("catalog",MODE_PRIVATE)
         val now=System.currentTimeMillis()
         val lastCatalog=catalogPrefs.getLong("last_refresh",0L)
-        if(now-lastCatalog > 12L*60L*60L*1000L){
+        val appState=getSharedPreferences("app_state",MODE_PRIVATE)
+        val forceV21=!appState.getBoolean("v21_catalog_rebuild_done",false)
+
+        if(forceV21 || now-lastCatalog > 12L*60L*60L*1000L){
+            if(forceV21){
+                catalogPrefs.edit()
+                    .remove("eligible_count")
+                    .remove("raw_count")
+                    .remove("bourse_count")
+                    .remove("farabourse_count")
+                    .remove("base_count")
+                    .remove("leveraged_count")
+                    .remove("unknown_count")
+                    .remove("excluded_count")
+                    .putString("status","در حال بازسازی کامل فهرست نمادها")
+                    .apply()
+            }
+
             val catalogReq=OneTimeWorkRequestBuilder<SymbolCatalogWorker>()
                 .setConstraints(HistoricalWorker.networkConstraint())
                 .build()
             WorkManager.getInstance(this).enqueueUniqueWork(
                 SymbolCatalogWorker.CHAIN,
-                ExistingWorkPolicy.KEEP,
+                if(forceV21) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
                 catalogReq
             )
+            if(forceV21){
+                appState.edit().putBoolean("v21_catalog_rebuild_done",true).apply()
+            }
         }
 
         scheduleBackgroundWork()

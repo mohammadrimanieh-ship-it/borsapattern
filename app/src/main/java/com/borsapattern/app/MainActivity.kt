@@ -97,6 +97,13 @@ class MainActivity:ComponentActivity(){
         var metadataStatus by remember{mutableStateOf("آماده")}
         var nextDayStatus by remember{mutableStateOf("آماده")}
         var catalogStatus by remember{mutableStateOf("در حال آماده‌سازی فهرست نمادها")}
+        var catalogRaw by remember{mutableStateOf(0)}
+        var catalogBourse by remember{mutableStateOf(0)}
+        var catalogFarabourse by remember{mutableStateOf(0)}
+        var catalogBase by remember{mutableStateOf(0)}
+        var catalogLeveraged by remember{mutableStateOf(0)}
+        var catalogUnknown by remember{mutableStateOf(0)}
+        var catalogExcluded by remember{mutableStateOf(0)}
 
         LaunchedEffect(Unit){
             while(true){
@@ -104,12 +111,23 @@ class MainActivity:ComponentActivity(){
                 val types=MarketPrefs.selectedTypes(this@MainActivity).toList()
                 symbols=app.db.dao().symbolCount()
                 records=app.db.dao().dailyCount()
-                eligibleCount=app.db.dao().allSymbols().count{
+                val prefEligible=catalogPrefs.getInt("eligible_count",-1)
+                eligibleCount=if(prefEligible>=0) prefEligible else app.db.dao().allSymbols().count{
                     val effectiveType=MarketPrefs.classifyType(
                         it.symbol,it.name,it.flow,it.boardTitle
                     )
-                    MarketPrefs.isSignalUniverse(
-                        it.segment,effectiveType,it.symbol,it.name
+                    val derivedSegment=MarketPrefs.classify(it.flow,it.boardTitle)
+                    val effectiveSegment=if(derivedSegment==MarketPrefs.OTHER) it.segment else derivedSegment
+                    val stockLike=
+                        effectiveType==MarketPrefs.TYPE_STOCK ||
+                        effectiveType==MarketPrefs.TYPE_BASE ||
+                        (
+                            effectiveType==MarketPrefs.TYPE_FUND &&
+                            MarketPrefs.isLeveragedFund(it.symbol,it.name)
+                        )
+                    stockLike && (
+                        effectiveSegment!=MarketPrefs.OTHER ||
+                        MarketPrefs.selectedSegments(this@MainActivity).containsAll(MarketPrefs.allSegments)
                     )
                 }
                 candidates=app.db.dao().candidateCount()
@@ -130,6 +148,13 @@ class MainActivity:ComponentActivity(){
                 metadataStatus=metaPrefs.getString("status","آماده")?:"آماده"
                 nextDayStatus=nextPrefs.getString("status","آماده")?:"آماده"
                 catalogStatus=catalogPrefs.getString("status","در حال آماده‌سازی فهرست نمادها")?:"در حال آماده‌سازی فهرست نمادها"
+                catalogRaw=catalogPrefs.getInt("raw_count",0)
+                catalogBourse=catalogPrefs.getInt("bourse_count",0)
+                catalogFarabourse=catalogPrefs.getInt("farabourse_count",0)
+                catalogBase=catalogPrefs.getInt("base_count",0)
+                catalogLeveraged=catalogPrefs.getInt("leveraged_count",0)
+                catalogUnknown=catalogPrefs.getInt("unknown_count",0)
+                catalogExcluded=catalogPrefs.getInt("excluded_count",0)
                 delay(1200)
             }
         }
@@ -176,6 +201,7 @@ class MainActivity:ComponentActivity(){
                 containerColor=Color(0xFFF6F7FB),
                 topBar={
                     Surface(
+                        modifier=Modifier.statusBarsPadding(),
                         color=Color.White,
                         shadowElevation=1.dp
                     ){
@@ -200,7 +226,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.0-test",
+                                    "Signal • v2.1-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -279,7 +305,9 @@ class MainActivity:ComponentActivity(){
                             catalogStatus,{selectedSymbol=it}
                         )
                         3 -> DataExtractionPage(
-                            eligibleCount,syncStatus,syncDone,syncTotal,
+                            eligibleCount,catalogRaw,catalogBourse,catalogFarabourse,
+                            catalogBase,catalogLeveraged,catalogUnknown,catalogExcluded,
+                            syncStatus,syncDone,syncTotal,
                             metadataStatus,catalogStatus,
                             onMarkets={showMarkets=true},
                             onNames={startNameRepair()},
@@ -400,7 +428,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.0-test",
+                        "v2.1-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -827,6 +855,8 @@ class MainActivity:ComponentActivity(){
     @Composable
     private fun DataExtractionPage(
         eligibleCount:Int,
+        rawCount:Int,bourseCount:Int,farabourseCount:Int,baseCount:Int,
+        leveragedCount:Int,unknownCount:Int,excludedCount:Int,
         syncStatus:String,syncDone:Int,syncTotal:Int,metadataStatus:String,
         catalogStatus:String,
         onMarkets:()->Unit,onNames:()->Unit,onCatalog:()->Unit,
@@ -858,8 +888,36 @@ class MainActivity:ComponentActivity(){
                         Column(Modifier.weight(1f)){
                             Text("فهرست نمادها",fontWeight=FontWeight.Black)
                             Text(catalogStatus,fontSize=11.sp,color=Color(0xFF747785))
+                            Text(
+                                "خام ${fa(rawCount)} • حذف‌شده ${fa(excludedCount)}",
+                                fontSize=10.sp,color=Color(0xFF91939D)
+                            )
                         }
                         TextButton(onClick=onCatalog){Text("بازسازی فهرست")}
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(6.dp)
+                    ){
+                        MetricPill("بورس",fa(bourseCount),Modifier.weight(1f))
+                        MetricPill("فرابورس",fa(farabourseCount),Modifier.weight(1f))
+                        MetricPill("پایه",fa(baseCount),Modifier.weight(1f))
+                        MetricPill("اهرمی",fa(leveragedCount),Modifier.weight(1f))
+                    }
+                    if(unknownCount>0){
+                        Spacer(Modifier.height(6.dp))
+                        Surface(
+                            color=Color(0xFFFFF6DF),
+                            shape=RoundedCornerShape(12.dp)
+                        ){
+                            Text(
+                                "${fa(unknownCount)} نماد سهام‌مانند هنوز بازار مشخص ندارند؛ در حالت انتخاب همه بازارها حذف نمی‌شوند.",
+                                Modifier.fillMaxWidth().padding(9.dp),
+                                fontSize=10.sp,
+                                color=Color(0xFF7B6517)
+                            )
+                        }
                     }
                 }
             }
