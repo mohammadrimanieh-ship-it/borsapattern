@@ -13,8 +13,17 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     override suspend fun doWork():Result=coroutineScope{
         val items=dao.pendingNextDayChecks(40)
         if(items.isEmpty()){
-            prefs.edit().putString("status","بررسی روز معاملاتی بعد کامل شد").apply()
+            prefs.edit().putString("status","بررسی روز معاملاتی بعد کامل شد؛ Walk-Forward شروع شد").apply()
             QueuePatternLearningEngine.rebuild(applicationContext)
+            val pre=OneTimeWorkRequestBuilder<PreQueueBacktestWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInputData(workDataOf("batch" to 24))
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                PreQueueBacktestWorker.CHAIN,
+                ExistingWorkPolicy.REPLACE,
+                pre
+            )
             return@coroutineScope Result.success()
         }
         prefs.edit().putString("status","در حال بررسی ماندگاری صف روز بعد").apply()
@@ -28,8 +37,17 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             WorkManager.getInstance(applicationContext)
                 .enqueueUniqueWork(CHAIN,ExistingWorkPolicy.APPEND_OR_REPLACE,n)
         } else {
-            prefs.edit().putString("status","بررسی روز معاملاتی بعد کامل شد").apply()
+            prefs.edit().putString("status","بررسی روز معاملاتی بعد کامل شد؛ Walk-Forward شروع شد").apply()
             QueuePatternLearningEngine.rebuild(applicationContext)
+            val pre=OneTimeWorkRequestBuilder<PreQueueBacktestWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInputData(workDataOf("batch" to 24))
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                PreQueueBacktestWorker.CHAIN,
+                ExistingWorkPolicy.REPLACE,
+                pre
+            )
         }
         Result.success()
     }

@@ -13,7 +13,10 @@ class BorsaApp:Application(){
     override fun onCreate(){
         super.onCreate()
         db=Room.databaseBuilder(this,AppDatabase::class.java,"borsa.db")
-            .addMigrations(MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,
+                MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7
+            )
             .build()
         Notifications.createChannel(this)
 
@@ -173,6 +176,26 @@ class BorsaApp:Application(){
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN signalTime INTEGER")
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN nextTradingDate INTEGER")
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN nextDayQueueStatus TEXT NOT NULL DEFAULT 'PENDING'")
+            }
+        }
+        val MIGRATION_6_7=object:Migration(6,7){
+            override fun migrate(db:SupportSQLiteDatabase){
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS prequeue_snapshots (
+                        insCode TEXT NOT NULL,
+                        date INTEGER NOT NULL,
+                        minutesBefore INTEGER NOT NULL,
+                        snapshotTime INTEGER NOT NULL,
+                        score REAL NOT NULL,
+                        bidImbalance REAL NOT NULL,
+                        bidGrowth REAL NOT NULL,
+                        askDrop REAL NOT NULL,
+                        pricePressure REAL NOT NULL,
+                        label INTEGER NOT NULL,
+                        detected INTEGER NOT NULL,
+                        PRIMARY KEY(insCode,date,minutesBefore)
+                    )
+                """.trimIndent())
             }
         }
     }

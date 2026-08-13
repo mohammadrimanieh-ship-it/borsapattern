@@ -66,6 +66,7 @@ class MainActivity:ComponentActivity(){
         val nextPrefs=remember{getSharedPreferences("nextday",Context.MODE_PRIVATE)}
         val catalogPrefs=remember{getSharedPreferences("catalog",Context.MODE_PRIVATE)}
         val queueLearningPrefs=remember{getSharedPreferences("queue_learning",Context.MODE_PRIVATE)}
+        val preQueuePrefs=remember{getSharedPreferences("prequeue_backtest",Context.MODE_PRIVATE)}
 
         var symbols by remember{mutableStateOf(0)}
         var records by remember{mutableStateOf(0)}
@@ -84,6 +85,7 @@ class MainActivity:ComponentActivity(){
         var searchResults by remember{mutableStateOf(emptyList<SymbolEntity>())}
         var selectedSymbol by remember{mutableStateOf<SymbolEntity?>(null)}
         var selectedSignals by remember{mutableStateOf(emptyList<SymbolSignalRow>())}
+        var selectedPreQueue by remember{mutableStateOf(emptyList<PreQueueSnapshotRow>())}
         var selectedStats by remember{mutableStateOf<SymbolDetailStats?>(null)}
         var liveEnabled by remember{mutableStateOf(false)}
         var lastLiveScan by remember{mutableStateOf<Long?>(null)}
@@ -118,6 +120,14 @@ class MainActivity:ComponentActivity(){
         var learnedMedianTime by remember{mutableStateOf(0)}
         var learnedMedianQueueValue by remember{mutableStateOf(0L)}
         var learnedAvgScore by remember{mutableStateOf(0f)}
+        var preQueueStatus by remember{mutableStateOf("آماده")}
+        var detect30 by remember{mutableStateOf(0f)}
+        var detect20 by remember{mutableStateOf(0f)}
+        var detect15 by remember{mutableStateOf(0f)}
+        var detect10 by remember{mutableStateOf(0f)}
+        var detect5 by remember{mutableStateOf(0f)}
+        var falsePositiveRate by remember{mutableStateOf(0f)}
+        var preQueueSnapshots by remember{mutableStateOf(0)}
 
         LaunchedEffect(Unit){
             while(true){
@@ -165,6 +175,15 @@ class MainActivity:ComponentActivity(){
                 learnedMedianQueueValue=queueLearningPrefs.getLong("median_success_queue_value",0L)
                 learnedAvgScore=queueLearningPrefs.getFloat("avg_success_score",0f)
 
+                preQueueStatus=preQueuePrefs.getString("status","آماده")?:"آماده"
+                detect30=preQueuePrefs.getFloat("rate_30",0f)
+                detect20=preQueuePrefs.getFloat("rate_20",0f)
+                detect15=preQueuePrefs.getFloat("rate_15",0f)
+                detect10=preQueuePrefs.getFloat("rate_10",0f)
+                detect5=preQueuePrefs.getFloat("rate_5",0f)
+                falsePositiveRate=preQueuePrefs.getFloat("false_positive_rate",0f)
+                preQueueSnapshots=preQueuePrefs.getInt("snapshot_count",0)
+
                 syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
                 syncDone=syncPrefs.getInt("sync_done",0)
                 syncTotal=syncPrefs.getInt("sync_total",0)
@@ -194,10 +213,14 @@ class MainActivity:ComponentActivity(){
             val s=selectedSymbol
             if(s==null){
                 selectedSignals=emptyList()
+                selectedPreQueue=emptyList()
                 selectedStats=null
             }else{
                 selectedSignals=runCatching{
                     app.db.dao().signalHistoryForSymbol(s.insCode,250)
+                }.getOrDefault(emptyList())
+                selectedPreQueue=runCatching{
+                    app.db.dao().preQueueTimelineForSymbol(s.insCode,500)
                 }.getOrDefault(emptyList())
                 selectedStats=runCatching{
                     app.db.dao().symbolDetailStats(s.insCode)
@@ -252,7 +275,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.4-test",
+                                    "Signal • v2.5-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -337,11 +360,19 @@ class MainActivity:ComponentActivity(){
                             bestBucketRate=learnedBestBucketRate,
                             medianSuccessTime=learnedMedianTime,
                             medianSuccessQueueValue=learnedMedianQueueValue,
-                            avgSuccessScore=learnedAvgScore
+                            avgSuccessScore=learnedAvgScore,
+                            preQueueStatus=preQueueStatus,
+                            detect30=detect30,
+                            detect20=detect20,
+                            detect15=detect15,
+                            detect10=detect10,
+                            detect5=detect5,
+                            falsePositiveRate=falsePositiveRate,
+                            preQueueSnapshots=preQueueSnapshots
                         )
                         2 -> SymbolSearchPage(
                             searchText,{searchText=it},searchResults,
-                            selectedSymbol,selectedSignals,selectedStats,
+                            selectedSymbol,selectedSignals,selectedPreQueue,selectedStats,
                             catalogStatus,{selectedSymbol=it}
                         )
                         3 -> DataExtractionPage(
@@ -351,9 +382,9 @@ class MainActivity:ComponentActivity(){
                             metadataStatus,catalogStatus,
                             onMarkets={showMarkets=true},
                             onSymbolsUpdate={refreshSymbolCatalog()},
-                            onStart={years->
-                                saveExtractionSelection(years)
-                                startUpdate()
+                            onStart={mode->
+                                saveExtractionSelection(if(mode=="QUICK") 1 else 5)
+                                startUpdate(mode)
                             },
                             onAnalyze={startAnalyze()},
                             onNextDay={startNextDayCheck()}
@@ -467,7 +498,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.4.1-test",
+                        "v2.5-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -796,7 +827,11 @@ class MainActivity:ComponentActivity(){
         bestBucketRate:Float,
         medianSuccessTime:Int,
         medianSuccessQueueValue:Long,
-        avgSuccessScore:Float
+        avgSuccessScore:Float,
+        preQueueStatus:String,
+        detect30:Float,detect20:Float,detect15:Float,detect10:Float,detect5:Float,
+        falsePositiveRate:Float,
+        preQueueSnapshots:Int
     ){
         var onlyTwoDay by remember{mutableStateOf(true)}
         val twoDay=history.filter{
@@ -816,6 +851,49 @@ class MainActivity:ComponentActivity(){
                     title="الگوی صف خرید دو روزه",
                     subtitle="فقط صف‌های واقعی 09:00 تا 12:30؛ بازگشایی‌های بدون دامنه حذف شده‌اند"
                 )
+            }
+
+            item{
+                PolishedCard{
+                    Text("Walk-Forward قبل از صف",fontSize=17.sp,fontWeight=FontWeight.Black)
+                    Text(
+                        preQueueStatus,
+                        fontSize=10.sp,
+                        color=Color(0xFF777A86)
+                    )
+                    Text(
+                        "مدل فقط اطلاعات موجود تا همان لحظه را می‌بیند؛ نتیجه آینده وارد امتیاز نمی‌شود.",
+                        fontSize=10.sp,
+                        color=Color(0xFF777A86)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(5.dp)
+                    ){
+                        MetricPill("۳۰ دقیقه","${fa((detect30*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۲۰ دقیقه","${fa((detect20*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۱۵ دقیقه","${fa((detect15*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۱۰ دقیقه","${fa((detect10*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۵ دقیقه","${fa((detect5*100).toInt())}٪",Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(7.dp)
+                    ){
+                        MetricPill(
+                            "نمونه‌های زمانی",
+                            fa(preQueueSnapshots),
+                            Modifier.weight(1f)
+                        )
+                        MetricPill(
+                            "False Positive",
+                            "${fa((falsePositiveRate*100).toInt())}٪",
+                            Modifier.weight(1f)
+                        )
+                    }
+                }
             }
 
             item{
@@ -1065,9 +1143,9 @@ class MainActivity:ComponentActivity(){
         syncStatus:String,syncDone:Int,syncTotal:Int,metadataStatus:String,
         catalogStatus:String,
         onMarkets:()->Unit,onSymbolsUpdate:()->Unit,
-        onStart:(Int)->Unit,onAnalyze:()->Unit,onNextDay:()->Unit
+        onStart:(String)->Unit,onAnalyze:()->Unit,onNextDay:()->Unit
     ){
-        var years by remember{mutableIntStateOf(5)}
+        var selectedMode by remember{mutableStateOf("QUICK")}
         var showConfirm by remember{mutableStateOf(false)}
 
         LazyColumn(
@@ -1147,8 +1225,8 @@ class MainActivity:ComponentActivity(){
                         modifier=Modifier.weight(1f)
                     )
                     SummaryTile(
-                        title="بازه انتخابی",
-                        value="${fa(years)} سال",
+                        title="حالت استخراج",
+                        value=if(selectedMode=="QUICK") "سریع ۱ سال" else "عمیق ۵ سال",
                         bg=Color(0xFFF2ECFF),
                         modifier=Modifier.weight(1f)
                     )
@@ -1175,26 +1253,41 @@ class MainActivity:ComponentActivity(){
 
             item{
                 PolishedCard{
-                    Text("۲. بازه تاریخی",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    Text("۲. نوع استخراج",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    Text(
+                        "سریع: یک سال برای شروع تحلیل. عمیق: تکمیل پنج‌ساله با Resume و بدون دانلود دوباره داده کامل.",
+                        fontSize=10.sp,color=Color(0xFF747785)
+                    )
                     Spacer(Modifier.height(8.dp))
                     Row(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement=Arrangement.spacedBy(6.dp)
+                        horizontalArrangement=Arrangement.spacedBy(8.dp)
                     ){
-                        (1..5).forEach{y->
-                            FilterChip(
-                                selected=years==y,
-                                onClick={years=y},
-                                label={Text("${fa(y)} سال",fontSize=10.sp)},
-                                modifier=Modifier.weight(1f),
-                                colors=FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor=MaterialTheme.colorScheme.primary,
-                                    selectedLabelColor=Color.White,
-                                    containerColor=Color(0xFFF7F7FA)
-                                )
+                        FilterChip(
+                            selected=selectedMode=="QUICK",
+                            onClick={selectedMode="QUICK"},
+                            label={Text("استخراج سریع • ۱ سال")},
+                            modifier=Modifier.weight(1f),
+                            colors=FilterChipDefaults.filterChipColors(
+                                selectedContainerColor=MaterialTheme.colorScheme.primary,
+                                selectedLabelColor=Color.White
                             )
-                        }
+                        )
+                        FilterChip(
+                            selected=selectedMode=="DEEP",
+                            onClick={selectedMode="DEEP"},
+                            label={Text("تکمیل عمیق • ۵ سال")},
+                            modifier=Modifier.weight(1f),
+                            colors=FilterChipDefaults.filterChipColors(
+                                selectedContainerColor=MaterialTheme.colorScheme.primary,
+                                selectedLabelColor=Color.White
+                            )
+                        )
                     }
+                    Text(
+                        "اگر Android کار را متوقف کند، checkpoint ذخیره می‌شود و شروع بعدی از همان نماد ادامه می‌دهد.",
+                        fontSize=10.sp,color=Color(0xFF118658)
+                    )
                 }
             }
 
@@ -1206,7 +1299,9 @@ class MainActivity:ComponentActivity(){
                     shape=RoundedCornerShape(16.dp)
                 ){
                     Text(
-                        if(eligibleCount>0) "بررسی و شروع استخراج"
+                        if(eligibleCount>0)
+                            if(selectedMode=="QUICK") "شروع استخراج سریع"
+                            else "شروع تکمیل عمیق"
                         else "ابتدا فهرست نمادها را بازسازی کنید",
                         fontWeight=FontWeight.Bold
                     )
@@ -1244,7 +1339,12 @@ class MainActivity:ComponentActivity(){
                 text={
                     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
                         Text("Universe فعلی: ${fa(eligibleCount)} نماد")
-                        Text("بازه: ${fa(years)} سال")
+                        Text(
+                            if(selectedMode=="QUICK")
+                                "حالت: استخراج سریع یک‌ساله"
+                            else
+                                "حالت: تکمیل عمیق پنج‌ساله"
+                        )
                         Text(
                             "تا زمانی که «تایید و شروع» را نزنی هیچ Worker استخراجی اجرا نمی‌شود.",
                             fontSize=11.sp,color=MaterialTheme.colorScheme.primary,
@@ -1255,7 +1355,7 @@ class MainActivity:ComponentActivity(){
                 confirmButton={
                     Button(onClick={
                         showConfirm=false
-                        onStart(years)
+                        onStart(selectedMode)
                     }){Text("تایید و شروع")}
                 },
                 dismissButton={
@@ -1483,6 +1583,7 @@ class MainActivity:ComponentActivity(){
     private fun SymbolSearchPage(
         query:String,onQuery:(String)->Unit,results:List<SymbolEntity>,
         selected:SymbolEntity?,signals:List<SymbolSignalRow>,
+        preQueue:List<PreQueueSnapshotRow>,
         stats:SymbolDetailStats?,catalogStatus:String,onSelect:(SymbolEntity)->Unit
     ){
         if(selected!=null){
@@ -1524,6 +1625,18 @@ class MainActivity:ComponentActivity(){
                     }
                 }
 
+                if(preQueue.isNotEmpty()){
+                    item{
+                        PolishedCard{
+                            Text("تایم‌لاین هشدار قبل از صف",fontSize=16.sp,fontWeight=FontWeight.Black)
+                            Text(
+                                "امتیاز در ۳۰، ۲۰، ۱۵، ۱۰ و ۵ دقیقه قبل از تشکیل واقعی صف",
+                                fontSize=10.sp,color=Color(0xFF777A86)
+                            )
+                        }
+                    }
+                }
+
                 if(signals.isEmpty()){
                     item{
                         PolishedEmpty(
@@ -1562,18 +1675,68 @@ class MainActivity:ComponentActivity(){
                                 )
                                 Text(
                                     when(s.nextDayQueueStatus){
-                                        "QUEUE_AGAIN"->"روز بعد هم صف خرید ماند ✓"
+                                        "PREOPEN_QUEUE_NEXT_DAY"->"روز بعد از پیش‌گشایش صف خرید بود ★"
+                                        "QUEUE_AGAIN"->"روز بعد در تایم عادی صف خرید شد ✓"
                                         "NOT_QUEUE_NEXT_DAY"->"روز بعد صف نماند"
                                         "NO_NEXT_DAY"->"داده روز بعد موجود نیست"
                                         else->"روز بعد هنوز بررسی نشده"
                                     },
                                     fontSize=11.sp,
                                     color=when(s.nextDayQueueStatus){
+                                        "PREOPEN_QUEUE_NEXT_DAY"->Color(0xFF087A53)
                                         "QUEUE_AGAIN"->Color(0xFF118658)
                                         "NOT_QUEUE_NEXT_DAY"->Color(0xFFB85A5A)
                                         else->Color(0xFF777A86)
                                     }
                                 )
+                                val snaps=preQueue
+                                    .filter{it.date==s.date && it.label==1}
+                                    .sortedByDescending{it.minutesBefore}
+                                if(snaps.isNotEmpty()){
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "قبل از صف:",
+                                        fontSize=10.sp,
+                                        fontWeight=FontWeight.Bold,
+                                        color=Color(0xFF676A78)
+                                    )
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement=Arrangement.spacedBy(4.dp)
+                                    ){
+                                        snaps.take(5).forEach{p->
+                                            Surface(
+                                                modifier=Modifier.weight(1f),
+                                                color=if(p.detected) Color(0xFFE6F7ED) else Color(0xFFF4F4F7),
+                                                shape=RoundedCornerShape(10.dp)
+                                            ){
+                                                Column(
+                                                    Modifier.padding(vertical=6.dp,horizontal=3.dp),
+                                                    horizontalAlignment=Alignment.CenterHorizontally
+                                                ){
+                                                    Text("${fa(p.minutesBefore)}د",fontSize=8.sp)
+                                                    Text(
+                                                        fa(p.score.toInt()),
+                                                        fontSize=11.sp,
+                                                        fontWeight=FontWeight.Black,
+                                                        color=if(p.detected) Color(0xFF118658) else Color(0xFF777A86)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    val firstDetected=snaps
+                                        .filter{it.detected}
+                                        .maxByOrNull{it.minutesBefore}
+                                    Text(
+                                        if(firstDetected!=null)
+                                            "اولین هشدار معتبر: ${fa(firstDetected.minutesBefore)} دقیقه قبل از صف"
+                                        else
+                                            "مدل قبل از این صف هشدار معتبر نداده است",
+                                        fontSize=10.sp,
+                                        color=if(firstDetected!=null) Color(0xFF118658) else Color(0xFFB05B5B)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1981,8 +2144,8 @@ class MainActivity:ComponentActivity(){
             .apply()
     }
 
-    private fun startUpdate(){
-        HistoricalWorker.start(this,false)
+    private fun startUpdate(mode:String="DEEP"){
+        HistoricalWorker.start(this,false,mode)
     }
 
     private fun startAnalyze(){

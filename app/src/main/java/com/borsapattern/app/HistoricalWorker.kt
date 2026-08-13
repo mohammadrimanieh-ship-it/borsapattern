@@ -2,6 +2,7 @@ package com.borsapattern.app
 
 import android.content.Context
 import androidx.work.*
+import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
@@ -13,9 +14,17 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     private val prefs get()=applicationContext.getSharedPreferences("sync",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
-        val offset=inputData.getInt("offset",0)
-        val batchSize=inputData.getInt("batchSize",35)
+        val requestedOffset=inputData.getInt("offset",0)
+        val batchSize=inputData.getInt("batchSize",12).coerceIn(8,24)
         val confirmed=inputData.getBoolean("userConfirmed",false)
+        val mode=inputData.getString("mode") ?: "DEEP"
+        val resumeOffset=prefs.getInt("resume_offset",0)
+        val resumeMode=prefs.getString("resume_mode","")
+        val offset=if(
+            requestedOffset==0 &&
+            prefs.getBoolean("resume_pending",false) &&
+            resumeMode==mode
+        ) resumeOffset else requestedOffset
 
         if(!confirmed){
             prefs.edit()
@@ -68,7 +77,11 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             val wantedSegments=MarketPrefs.selectedSegments(applicationContext)
             val wantedTypes=MarketPrefs.selectedTypes(applicationContext)
             val extractPrefs=applicationContext.getSharedPreferences("extract",Context.MODE_PRIVATE)
-            val years=extractPrefs.getInt("years",5).coerceIn(1,5)
+            val years=when(mode){
+                "QUICK" -> 1
+                "DEEP" -> 5
+                else -> extractPrefs.getInt("years",5).coerceIn(1,5)
+            }
             val allStored=dao.allSymbols()
             val symbols=allStored.filter{
                 val effectiveType=MarketPrefs.classifyType(
@@ -98,7 +111,7 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 wantedTypes.contains(effectiveType) &&
                 supportedType &&
                 !it.symbol.isNullOrBlank()
-            }
+            }.sortedBy{it.insCode}
 
             if(symbols.isEmpty()){
                 prefs.edit()
@@ -117,11 +130,20 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             val start=offset.coerceIn(0,total)
             val end=min(start+batchSize,total)
             val cutoff=LocalDate.now().minusDays((years*366L)+10L)
+            val cutoffInt=cutoff.format(DateTimeFormatter.BASIC_ISO_DATE).toInt()
+            val freshCutoff=LocalDate.now().minusDays(12)
+                .format(DateTimeFormatter.BASIC_ISO_DATE).toInt()
 
             prefs.edit()
                 .putInt("sync_total",total)
                 .putInt("sync_done",start)
-                .putString("sync_status","دانلود تاریخچه در پس‌زمینه: $start از $total نماد")
+                .putInt("resume_offset",start)
+                .putString("resume_mode",mode)
+                .putBoolean("resume_pending",true)
+                .putString(
+                    "sync_status",
+                    "${if(mode=="QUICK") "استخراج سریع" else "تکمیل عمیق"}: $start از $total نماد"
+                )
                 .putBoolean("sync_running",true)
                 .apply()
 
@@ -129,37 +151,54 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 val s=symbols[idx]
                 try{
                     val latest=dao.latestDateFor(s.insCode)?:0
-                    val d=api.jsonArrayFrom(api.dailyRaw(s.insCode),"closingPriceDaily")
-                    val rows=mutableListOf<DailyEntity>()
+                    val earliest=dao.earliestDateFor(s.insCode)
+                    val coverageEnough=earliest!=null && earliest<=cutoffInt
+                    val recentEnough=latest>=freshCutoff
 
-                    for(j in 0 until d.length()){
-                        val o=d.optJSONObject(j)?:continue
-                        val date=firstInt(o,"dEven","date")?:continue
-                        if(date<=latest) continue
+                    if(!(coverageEnough && recentEnough)){
+                        val d=api.jsonArrayFrom(api.dailyRaw(s.insCode),"closingPriceDaily")
+                        val rows=mutableListOf<DailyEntity>()
 
-                        val parsed=runCatching{
-                            LocalDate.parse(date.toString(),DateTimeFormatter.BASIC_ISO_DATE)
-                        }.getOrNull()?:continue
-                        if(parsed.isBefore(cutoff)) continue
+                        for(j in 0 until d.length()){
+                            val o=d.optJSONObject(j)?:continue
+                            val date=firstInt(o,"dEven","date")?:continue
+                            if(date<cutoffInt) continue
 
-                        rows += DailyEntity(
-                            insCode=s.insCode,
-                            date=date,
-                            high=firstDouble(o,"priceMax","pmax","pMax"),
-                            last=firstDouble(o,"pDrCotVal","pl","lastPrice"),
-                            yesterday=firstDouble(o,"priceYesterday","py","yesterdayPrice"),
-                            volume=firstDouble(o,"qTotTran5J","volume"),
-                            value=firstDouble(o,"qTotCap","value")
-                        )
+                            rows += DailyEntity(
+                                insCode=s.insCode,
+                                date=date,
+                                high=firstDouble(o,"priceMax","pmax","pMax"),
+                                last=firstDouble(o,"pDrCotVal","pl","lastPrice"),
+                                yesterday=firstDouble(o,"priceYesterday","py","yesterdayPrice"),
+                                volume=firstDouble(o,"qTotTran5J","volume"),
+                                value=firstDouble(o,"qTotCap","value")
+                            )
+                        }
+                        if(rows.isNotEmpty()) dao.upsertDaily(rows)
                     }
-                    if(rows.isNotEmpty()) dao.upsertDaily(rows)
+                }catch(e:CancellationException){
+                    prefs.edit()
+                        .putInt("resume_offset",idx)
+                        .putBoolean("resume_pending",true)
+                        .putBoolean("sync_running",false)
+                        .putString(
+                            "sync_status",
+                            "استخراج موقتاً متوقف شد؛ ادامه از نماد ${idx+1} ذخیره شد"
+                        )
+                        .apply()
+                    throw e
                 }catch(_:Exception){
                     // خطای یک نماد نباید بقیه دانلود را متوقف کند.
                 }
 
                 prefs.edit()
                     .putInt("sync_done",idx+1)
-                    .putString("sync_status","دانلود تاریخچه در پس‌زمینه: ${idx+1} از $total نماد")
+                    .putInt("resume_offset",idx+1)
+                    .putBoolean("resume_pending",true)
+                    .putString(
+                        "sync_status",
+                        "${if(mode=="QUICK") "استخراج سریع" else "تکمیل عمیق"}: ${idx+1} از $total نماد"
+                    )
                     .apply()
 
                 setProgress(workDataOf(
@@ -177,7 +216,8 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     .setInputData(workDataOf(
                         "offset" to end,
                         "batchSize" to batchSize,
-                        "userConfirmed" to true
+                        "userConfirmed" to true,
+                        "mode" to mode
                     ))
                     .setInitialDelay(2,TimeUnit.SECONDS)
                     .build()
@@ -198,7 +238,12 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 .putInt("sync_done",total)
                 .putInt("sync_total",total)
                 .putBoolean("sync_running",false)
-                .putString("sync_status","تاریخچه کامل شد؛ تحلیل صف‌های معتبر شروع شد")
+                .putBoolean("resume_pending",false)
+                .putInt("resume_offset",0)
+                .putString(
+                    "sync_status",
+                    "${if(mode=="QUICK") "استخراج سریع" else "تکمیل عمیق"} کامل شد؛ تحلیل صف‌ها شروع شد"
+                )
                 .apply()
 
             val analysis=OneTimeWorkRequestBuilder<QueueAnalysisWorker>()
@@ -216,13 +261,24 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             )
 
             Result.success()
+        }catch(e:CancellationException){
+            prefs.edit()
+                .putBoolean("sync_running",false)
+                .putBoolean("resume_pending",true)
+                .putString(
+                    "sync_status",
+                    "استخراج توسط Android متوقف شد؛ نقطه ادامه ذخیره شده است"
+                )
+                .apply()
+            throw e
         }catch(e:Exception){
             prefs.edit()
                 .putString(
                     "sync_status",
-                    "خطای دریافت داده: ${e.message ?: "نامشخص"} — دوباره «شروع استخراج» را بزنید"
+                    "خطای دریافت داده: ${e.message ?: "نامشخص"} — ادامه از checkpoint انجام می‌شود"
                 )
                 .putBoolean("sync_running",false)
+                .putBoolean("resume_pending",true)
                 .apply()
             Result.success()
         }
@@ -231,13 +287,32 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     companion object{
         const val HISTORY_CHAIN="history_sync_chain"
 
-        fun start(context:Context, replace:Boolean=false){
+        fun start(
+            context:Context,
+            replace:Boolean=false,
+            mode:String="DEEP"
+        ){
+            val prefs=context.getSharedPreferences("sync",Context.MODE_PRIVATE)
+            val sameMode=prefs.getString("resume_mode","")==mode
+            val resume=if(
+                prefs.getBoolean("resume_pending",false) && sameMode
+            ) prefs.getInt("resume_offset",0) else 0
+
+            if(!sameMode){
+                prefs.edit()
+                    .putInt("resume_offset",0)
+                    .putString("resume_mode",mode)
+                    .putBoolean("resume_pending",false)
+                    .apply()
+            }
+
             val req=OneTimeWorkRequestBuilder<HistoricalWorker>()
                 .setConstraints(networkConstraint())
                 .setInputData(workDataOf(
-                    "offset" to 0,
-                    "batchSize" to 35,
-                    "userConfirmed" to true
+                    "offset" to resume,
+                    "batchSize" to if(mode=="QUICK") 18 else 10,
+                    "userConfirmed" to true,
+                    "mode" to mode
                 ))
                 .build()
 

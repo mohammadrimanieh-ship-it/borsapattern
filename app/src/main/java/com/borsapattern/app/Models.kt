@@ -28,6 +28,24 @@ data class QueueEventEntity(
     val nextDayQueueStatus:String="PENDING"
 )
 
+@Entity(
+    tableName="prequeue_snapshots",
+    primaryKeys=["insCode","date","minutesBefore"]
+)
+data class PreQueueSnapshotEntity(
+    val insCode:String,
+    val date:Int,
+    val minutesBefore:Int,
+    val snapshotTime:Int,
+    val score:Double,
+    val bidImbalance:Double,
+    val bidGrowth:Double,
+    val askDrop:Double,
+    val pricePressure:Double,
+    val label:Int,
+    val detected:Boolean
+)
+
 @Entity(tableName="live_scores")
 data class LiveScoreEntity(
     @PrimaryKey val insCode:String,
@@ -77,11 +95,26 @@ data class SymbolDetailStats(
     val lastDate:Int?
 )
 
+data class PreQueueSnapshotRow(
+    val insCode:String,
+    val date:Int,
+    val minutesBefore:Int,
+    val snapshotTime:Int,
+    val score:Double,
+    val bidImbalance:Double,
+    val bidGrowth:Double,
+    val askDrop:Double,
+    val pricePressure:Double,
+    val label:Int,
+    val detected:Boolean
+)
+
 @Dao
 interface BorsaDao {
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun upsertSymbols(items:List<SymbolEntity>)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun upsertDaily(items:List<DailyEntity>)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun upsertEvents(items:List<QueueEventEntity>)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun upsertPreQueueSnapshots(items:List<PreQueueSnapshotEntity>)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun upsertScores(items:List<LiveScoreEntity>)
     @Insert suspend fun insertPaperTrade(item:PaperTradeEntity):Long
 
@@ -93,6 +126,7 @@ interface BorsaDao {
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='ERROR'") suspend fun errorCount():Int
     @Query("SELECT MAX(date) FROM daily") suspend fun latestMarketDate():Int?
     @Query("SELECT MAX(date) FROM daily WHERE insCode=:insCode") suspend fun latestDateFor(insCode:String):Int?
+    @Query("SELECT MIN(date) FROM daily WHERE insCode=:insCode") suspend fun earliestDateFor(insCode:String):Int?
 
     @Query("SELECT * FROM symbols ORDER BY COALESCE(symbol,name,insCode)")
     suspend fun allSymbols():List<SymbolEntity>
@@ -309,6 +343,21 @@ interface BorsaDao {
     suspend fun signalHistoryForSymbol(insCode:String,limit:Int=250):List<SymbolSignalRow>
 
     @Query("""
+      SELECT * FROM prequeue_snapshots
+      WHERE insCode=:insCode AND label=1
+        AND minutesBefore IN (30,20,15,10,5)
+      ORDER BY date DESC, minutesBefore DESC
+      LIMIT :limit
+    """)
+    suspend fun preQueueTimelineForSymbol(
+        insCode:String,
+        limit:Int=500
+    ):List<PreQueueSnapshotRow>
+
+    @Query("SELECT COUNT(*) FROM prequeue_snapshots")
+    suspend fun preQueueSnapshotCount():Int
+
+    @Query("""
       SELECT * FROM queue_events
       WHERE status='QUEUE_CONFIRMED' AND nextDayQueueStatus='PENDING'
       ORDER BY date ASC LIMIT :limit
@@ -328,8 +377,9 @@ interface BorsaDao {
 @Database(
     entities=[
         SymbolEntity::class,DailyEntity::class,QueueEventEntity::class,
+        PreQueueSnapshotEntity::class,
         LiveScoreEntity::class,PaperTradeEntity::class
     ],
-    version=6,exportSchema=false
+    version=7,exportSchema=false
 )
 abstract class AppDatabase:RoomDatabase(){ abstract fun dao():BorsaDao }
