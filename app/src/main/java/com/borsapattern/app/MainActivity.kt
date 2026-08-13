@@ -193,7 +193,7 @@ class MainActivity:ComponentActivity(){
                             )
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                "v1.5-test",
+                                "v1.7-test",
                                 color=Color(0xFF666978),
                                 fontSize=10.sp
                             )
@@ -369,7 +369,7 @@ class MainActivity:ComponentActivity(){
                     ){
                         Column{
                             Text(
-                                "اسکن بر اساس داده‌های زنده بازار از ساعت 09:00 به بعد",
+                                "اسکن و سیگنال فقط در بازه 09:00 تا 12:30",
                                 fontSize=11.sp,
                                 color=Color(0xFF6F7280)
                             )
@@ -1013,11 +1013,7 @@ class MainActivity:ComponentActivity(){
 
         val rows=listOf(
             listOf(MarketPrefs.TYPE_STOCK,MarketPrefs.TYPE_BASE),
-            listOf(MarketPrefs.TYPE_HOUSING,MarketPrefs.TYPE_RIGHT),
-            listOf(MarketPrefs.TYPE_BOND),
-            listOf(MarketPrefs.TYPE_FUTURE,MarketPrefs.TYPE_FUND),
-            listOf(MarketPrefs.TYPE_COMMODITY,MarketPrefs.TYPE_TAL),
-            listOf(MarketPrefs.TYPE_ENERGY)
+            listOf(MarketPrefs.TYPE_FUND)
         )
 
         AlertDialog(

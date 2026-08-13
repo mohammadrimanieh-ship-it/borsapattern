@@ -17,8 +17,8 @@ android {
         applicationId = "com.borsapattern.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 18
-        versionName = "1.5-test"
+        versionCode = 21
+        versionName = "1.7-test"
     }
 
     signingConfigs {
@@ -37,7 +37,12 @@ android {
             if (!releaseStorePath.isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("borsaRelease")
             }
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 

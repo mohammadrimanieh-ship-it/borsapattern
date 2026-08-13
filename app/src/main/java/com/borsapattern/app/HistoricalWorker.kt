@@ -59,9 +59,17 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             val requestedSymbols=extractPrefs.getStringSet("symbols",emptySet()) ?: emptySet()
             val years=extractPrefs.getInt("years",5).coerceIn(1,5)
             val symbols=dao.allSymbols().filter{
+                val supportedType =
+                    it.instrumentType==MarketPrefs.TYPE_STOCK ||
+                    it.instrumentType==MarketPrefs.TYPE_BASE ||
+                    (
+                        it.instrumentType==MarketPrefs.TYPE_FUND &&
+                        MarketPrefs.isLeveragedFund(it.symbol,it.name)
+                    )
+
                 wantedSegments.contains(it.segment) &&
                 wantedTypes.contains(it.instrumentType) &&
-                it.instrumentType != MarketPrefs.TYPE_OPTION &&
+                supportedType &&
                 (requestedSymbols.isEmpty() || requestedSymbols.contains(it.symbol))
             }
             if(symbols.isEmpty()){

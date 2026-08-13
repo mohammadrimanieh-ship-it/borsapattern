@@ -30,14 +30,7 @@ object MarketPrefs {
     val allTypes=linkedSetOf(
         TYPE_STOCK,
         TYPE_BASE,
-        TYPE_HOUSING,
-        TYPE_RIGHT,
-        TYPE_BOND,
-        TYPE_FUTURE,
-        TYPE_FUND,
-        TYPE_COMMODITY,
-        TYPE_TAL,
-        TYPE_ENERGY
+        TYPE_FUND
     )
 
     fun selected(ctx:Context):Set<String> = selectedSegments(ctx)
@@ -82,7 +75,7 @@ object MarketPrefs {
         TYPE_BOND -> "اوراق بدهی"
         TYPE_OPTION -> "اختیار معامله"
         TYPE_FUTURE -> "آتی"
-        TYPE_FUND -> "صندوق سرمایه گذاری"
+        TYPE_FUND -> "صندوق اهرمی"
         TYPE_COMMODITY -> "بورس کالا"
         TYPE_TAL -> "معاملات پایانی TAL"
         TYPE_ENERGY -> "انرژی"

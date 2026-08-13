@@ -13,7 +13,9 @@ object LiveScanEngine {
         val dao=app.db.dao()
         val api=TsetmcClient()
         val nowIran=LocalTime.now(ZoneId.of("Asia/Tehran"))
-        if(!nowIran.isBefore(LocalTime.of(8,45)) && nowIran.isBefore(LocalTime.of(9,0))){
+        val marketOpen=LocalTime.of(9,0)
+        val marketClose=LocalTime.of(12,30)
+        if(nowIran.isBefore(marketOpen) || nowIran.isAfter(marketClose)){
             return@withContext 0
         }
 
@@ -47,7 +49,7 @@ object LiveScanEngine {
             )
 
             val eventTime=firstInt(o,"hEven","time")
-            if(eventTime!=null && eventTime in 84500..85959) continue
+            if(eventTime==null || eventTime !in 90000..123000) continue
 
             val signalName=meta?.name ?: rawName
             val signalSymbol=meta?.symbol ?: cleanSymbol(rawSymbol,ins)
