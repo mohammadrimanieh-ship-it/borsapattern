@@ -1,31 +1,17 @@
-Signal v2.1-test
-
-اصلاح ریشه‌ای فهرست نمادها و Universe:
-
-- فهرست خام MarketWatch ابتدا بدون فیلتر Universe داخل جدول symbols ذخیره می‌شود.
-- بعد از ذخیره، طبقه‌بندی در مرحله دوم انجام می‌شود.
-- جستجوی نماد از لیست خام ذخیره‌شده استفاده می‌کند؛ بنابراین فیلتر Universe باعث ناپدیدشدن نماد از جستجو نمی‌شود.
-- در اولین اجرای v2.1 فهرست نمادها اجباراً یک‌بار از نو بازسازی می‌شود.
-- نام‌های موجود با مقدار خالی overwrite نمی‌شوند.
-
-صفحه استخراج اکنون شمارش جداگانه نشان می‌دهد:
-- تعداد خام ذخیره‌شده
-- بورس
-- فرابورس
-- بازار پایه
-- صندوق‌های اهرمی
-- نمادهای stock-like با بازار نامشخص
-- تعداد حذف‌شده
-
-اگر flow/board برای یک نماد stock-like ناقص باشد:
-- نماد از دیتابیس و جستجو حذف نمی‌شود.
-- اگر همه بازارها انتخاب شده باشند، از Universe هم به دلیل ناقص بودن segment حذف نمی‌شود.
-- در UI تعداد این گروه جداگانه نمایش داده می‌شود.
-
-ناوبری پایین صفحه و RTL نسخه قبل حفظ شده است.
-فاصله نوار وضعیت در هدر اصلاح شده تا عنوان با ساعت/باتری تداخل نداشته باشد.
-استخراج همچنان فقط پس از تایید نهایی کاربر انجام می‌شود.
-ساعت تحلیل 09:00 تا 12:30 و تنظیمات امنیت Release حفظ شده‌اند.
-
-versionCode=26
-versionName=2.1-test
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <exclude domain="root" path="."/>
+        <exclude domain="file" path="."/>
+        <exclude domain="database" path="."/>
+        <exclude domain="sharedpref" path="."/>
+        <exclude domain="external" path="."/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="."/>
+        <exclude domain="file" path="."/>
+        <exclude domain="database" path="."/>
+        <exclude domain="sharedpref" path="."/>
+        <exclude domain="external" path="."/>
+    </device-transfer>
+</data-extraction-rules>
