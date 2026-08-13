@@ -99,6 +99,10 @@ class MainActivity:ComponentActivity(){
         var analysisTotal by remember{mutableStateOf(0)}
         var metadataStatus by remember{mutableStateOf("آماده")}
         var nextDayStatus by remember{mutableStateOf("آماده")}
+        var nextDayDone by remember{mutableStateOf(0)}
+        var nextDayTotal by remember{mutableStateOf(0)}
+        var walkDone by remember{mutableStateOf(0)}
+        var walkTotal by remember{mutableStateOf(0)}
         var catalogStatus by remember{mutableStateOf("در حال آماده‌سازی فهرست نمادها")}
         var catalogRaw by remember{mutableStateOf(0)}
         var catalogBourse by remember{mutableStateOf(0)}
@@ -202,6 +206,10 @@ class MainActivity:ComponentActivity(){
                 analysisTotal=analysisPrefs.getInt("analysis_batch_total",0)
                 metadataStatus=metaPrefs.getString("status","آماده")?:"آماده"
                 nextDayStatus=nextPrefs.getString("status","آماده")?:"آماده"
+                nextDayDone=nextPrefs.getInt("done",0)
+                nextDayTotal=nextPrefs.getInt("total",0)
+                walkDone=preQueuePrefs.getInt("events_done",0)
+                walkTotal=preQueuePrefs.getInt("events_total",0)
                 catalogStatus=catalogPrefs.getString("status","در حال آماده‌سازی فهرست نمادها")?:"در حال آماده‌سازی فهرست نمادها"
                 catalogRaw=catalogPrefs.getInt("raw_count",0)
                 catalogBourse=catalogPrefs.getInt("bourse_count",0)
@@ -285,7 +293,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.6-test",
+                                    "Signal • v2.7-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -395,6 +403,9 @@ class MainActivity:ComponentActivity(){
                             catalogBase,catalogLeveraged,catalogUnknown,catalogExcluded,
                             syncStatus,syncDone,syncTotal,
                             metadataStatus,catalogStatus,
+                            analysisStatus,analysisDone,analysisTotal,
+                            nextDayStatus,nextDayDone,nextDayTotal,
+                            preQueueStatus,walkDone,walkTotal,
                             onMarkets={showMarkets=true},
                             onSymbolsUpdate={refreshSymbolCatalog()},
                             onStart={mode->
@@ -512,7 +523,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.6-test",
+                        "v2.7-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -1218,6 +1229,9 @@ class MainActivity:ComponentActivity(){
         leveragedCount:Int,unknownCount:Int,excludedCount:Int,
         syncStatus:String,syncDone:Int,syncTotal:Int,metadataStatus:String,
         catalogStatus:String,
+        analysisStatus:String,analysisDone:Int,analysisTotal:Int,
+        nextDayStatus:String,nextDayDone:Int,nextDayTotal:Int,
+        walkStatus:String,walkDone:Int,walkTotal:Int,
         onMarkets:()->Unit,onSymbolsUpdate:()->Unit,
         onStart:(String)->Unit,onAnalyze:()->Unit
     ){
@@ -1386,6 +1400,34 @@ class MainActivity:ComponentActivity(){
 
             item{
                 ProcessCard("وضعیت استخراج",syncStatus,syncDone,syncTotal)
+            }
+
+            item{
+                PolishedCard{
+                    Text("وضعیت تحلیل یکپارچه",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    ProcessCardInline(
+                        title="۱. صف پایدار روز اول",
+                        status=analysisStatus,
+                        done=analysisDone,
+                        total=analysisTotal
+                    )
+                    ProcessCardInline(
+                        title="۲. نتیجه روز کاری بعد",
+                        status=nextDayStatus,
+                        done=nextDayDone,
+                        total=nextDayTotal
+                    )
+                    ProcessCardInline(
+                        title="۳. Walk-Forward قبل از صف",
+                        status=walkStatus,
+                        done=walkDone,
+                        total=walkTotal
+                    )
+                    Text(
+                        "اگر یک مرحله قبلاً کامل شده باشد، اجرای دوباره تحلیل از مرحله ناقص بعدی ادامه پیدا می‌کند.",
+                        fontSize=10.sp,color=Color(0xFF118658)
+                    )
+                }
             }
 
             item{
@@ -1737,12 +1779,31 @@ class MainActivity:ComponentActivity(){
                                     )
                                 }
                                 Text(
-                                    "هشدار ${fmtTime(s.signalTime)}  •  صف/رخداد ${fmtTime(s.eventTime)}",
+                                    when(s.status){
+                                        "QUEUE_CONFIRMED" ->
+                                            "هشدار ${fmtTime(s.signalTime)} • صف پایدار ${fmtTime(s.eventTime)}"
+                                        "FRAGILE_QUEUE" ->
+                                            "صف شکننده ${fmtTime(s.eventTime)} • از سیگنال مثبت حذف شده"
+                                        "PREOPEN_QUEUE" ->
+                                            "صف از قبلِ ۹ وجود داشته • از روز سیگنال حذف شده"
+                                        "SPECIAL_REOPEN" ->
+                                            "بازگشایی ویژه • از مدل اصلی حذف شده"
+                                        "NOT_QUEUE" ->
+                                            "کاندید بررسی شد • صف پایدار تشکیل نشد"
+                                        "ERROR" ->
+                                            "تحلیل این رخداد نیازمند تلاش مجدد است"
+                                        else ->
+                                            "وضعیت: ${s.status}"
+                                    },
                                     fontSize=11.sp,
                                     color=Color(0xFF737684)
                                 )
                                 Text(
                                     when(s.nextDayQueueStatus){
+                                        "SKIPPED_PREOPEN_DAY1"->"نتیجه روز بعد برای این نمونه محاسبه نمی‌شود"
+                                        "SKIPPED_SPECIAL_REOPEN"->"بازگشایی ویژه؛ خارج از ارزیابی اصلی"
+                                        "SKIPPED_FRAGILE"->"صف روز اول پایدار نبود؛ نمونه منفی مدل"
+                                        "NEXT_DAY_DAILY_ONLY"->"داده سفارش روز بعد نبود؛ نتیجه روزانه ثبت شد"
                                         "PREOPEN_QUEUE_NEXT_DAY"->"روز بعد از پیش‌گشایش صف خرید بود ★"
                                         "QUEUE_AGAIN"->"روز بعد در تایم عادی صف خرید شد ✓"
                                         "POSITIVE_STRONG_NEXT_DAY"->"روز بعد مثبت قوی بود ✓"
@@ -2019,6 +2080,33 @@ class MainActivity:ComponentActivity(){
     }
 
     @Composable
+    private fun ProcessCardInline(
+        title:String,status:String,done:Int,total:Int
+    ){
+        Column(
+            Modifier.fillMaxWidth().padding(vertical=4.dp),
+            verticalArrangement=Arrangement.spacedBy(4.dp)
+        ){
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement=Arrangement.SpaceBetween
+            ){
+                Text(title,fontSize=11.sp,fontWeight=FontWeight.Bold)
+                if(total>0){
+                    Text("${fa(done)} / ${fa(total)}",fontSize=10.sp,color=Color(0xFF777A86))
+                }
+            }
+            Text(status,fontSize=10.sp,color=Color(0xFF747785))
+            if(total>0 && done<total){
+                LinearProgressIndicator(
+                    progress={done.toFloat()/total.toFloat()},
+                    modifier=Modifier.fillMaxWidth().height(5.dp)
+                )
+            }
+        }
+    }
+
+    @Composable
     private fun ProcessCard(title:String,status:String,done:Int,total:Int){
         Card(
             shape=RoundedCornerShape(20.dp),
@@ -2235,9 +2323,21 @@ class MainActivity:ComponentActivity(){
     }
 
     private fun startAnalyze(){
+        getSharedPreferences("analysis_pipeline",Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("enabled",true)
+            .putString("stage","DAY1")
+            .apply()
+
         val req=OneTimeWorkRequestBuilder<QueueAnalysisWorker>()
             .setConstraints(HistoricalWorker.networkConstraint())
-            .setInputData(workDataOf("batchSize" to 120,"parallelism" to 4))
+            .setInputData(
+                workDataOf(
+                    "batchSize" to 120,
+                    "parallelism" to 4,
+                    "resetErrors" to true
+                )
+            )
             .build()
         WorkManager.getInstance(this).enqueueUniqueWork(
             QueueAnalysisWorker.ANALYSIS_CHAIN,ExistingWorkPolicy.REPLACE,req

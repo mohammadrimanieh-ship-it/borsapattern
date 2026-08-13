@@ -15,12 +15,19 @@ object PatternEngine {
           FROM daily d
           INNER JOIN symbols s ON s.insCode=d.insCode
           WHERE d.yesterday>0 AND d.volume>0
-            AND s.segment IN ('BOURSE','FARABOURSE','BASE_YELLOW','BASE_ORANGE','BASE_RED')
             AND (
-              s.instrumentType IN ('TYPE_STOCK','TYPE_BASE')
+              (
+                s.segment IN ('BOURSE','FARABOURSE','BASE_YELLOW','BASE_ORANGE','BASE_RED')
+                AND s.instrumentType IN ('TYPE_STOCK','TYPE_BASE')
+              )
               OR (
                 s.instrumentType='TYPE_FUND' AND
-                (COALESCE(s.symbol,'') LIKE '%اهرم%' OR COALESCE(s.name,'') LIKE '%اهرم%')
+                (
+                    COALESCE(s.symbol,'') LIKE '%اهرم%'
+                    OR COALESCE(s.name,'') LIKE '%اهرم%'
+                    OR COALESCE(s.name,'') LIKE '%اهرمی%'
+                    OR COALESCE(s.symbol,'') IN ('توان','شتاب','موج','جهش','بیدار','دوایکس')
+                )
               )
             )
           ORDER BY d.insCode ASC,d.date ASC
@@ -113,19 +120,23 @@ object PatternEngine {
         rise:Double,
         previousPositive:List<Double>
     ):Boolean{
-        if(rise>=0.12) return true
-        if(rise<=0.055) return false
+        // Large reopenings are safely treated as special.
+        if(rise>=0.14) return true
+
+        // Do not remove ordinary wide-range / leveraged moves merely because
+        // they exceeded the usual 5–6% range.
+        if(rise<0.095) return false
 
         val clean=previousPositive
-            .filter{it>0 && it<0.12}
+            .filter{it>0 && it<0.14}
             .sorted()
 
-        val p90=if(clean.size>=8){
+        val p90=if(clean.size>=10){
             clean[((clean.size-1)*0.90).toInt()]
-        }else 0.04
+        }else 0.05
 
-        // Adaptive: normal ranges that were historically wider get a wider tolerance.
-        val threshold=max(0.055,min(0.10,p90*1.55))
+        // Special must be both unusually large for this symbol and at least 9.5%.
+        val threshold=max(0.095,min(0.135,p90*1.80))
         return rise>threshold
     }
 

@@ -93,6 +93,18 @@ class BorsaApp:Application(){
             )
         }
 
+        val pipelineState=getSharedPreferences("analysis_pipeline",MODE_PRIVATE)
+        if(pipelineState.getBoolean("enabled",false)){
+            val repair=OneTimeWorkRequestBuilder<PipelineCoordinatorWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .build()
+            WorkManager.getInstance(this).enqueueUniqueWork(
+                PipelineCoordinatorWorker.CHAIN,
+                ExistingWorkPolicy.KEEP,
+                repair
+            )
+        }
+
         scheduleBackgroundWork()
     }
 

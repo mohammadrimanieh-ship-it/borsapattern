@@ -48,27 +48,38 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
 
         if(items.isEmpty()){
             rebuildMetrics()
+            val done=dao.walkForwardProcessedCount()
+            val total=dao.walkForwardEligibleCount()
             prefs.edit()
                 .putBoolean("running",false)
-                .putString("status","Walk-Forward کامل شد")
+                .putInt("events_done",done)
+                .putInt("events_total",total)
+                .putString("status","Walk-Forward کامل شد: $done از $total رخداد")
                 .apply()
             return Result.success()
         }
 
+        val total=dao.walkForwardEligibleCount()
         prefs.edit()
             .putBoolean("running",true)
+            .putInt("events_total",total)
+            .putInt("events_done",dao.walkForwardProcessedCount())
             .putString("status","در حال بازسازی هشدارهای قبل از صف")
             .apply()
 
-        var completed=0
         for(item in items){
             try{
                 analyzeDay(item.insCode,item.date,item.eventTime,item.status)
-            }catch(_:Exception){}
-            completed++
+            }catch(_:Exception){
+                markUnavailable(item.insCode,item.date)
+            }
+            val done=dao.walkForwardProcessedCount()
             prefs.edit()
-                .putString("status","تحلیل پیش‌صف: $completed از ${items.size} در این مرحله")
+                .putInt("events_done",done)
+                .putInt("events_total",total)
+                .putString("status","Walk-Forward: $done از $total رخداد")
                 .apply()
+            setProgress(workDataOf("done" to done,"total" to total))
         }
 
         val next=OneTimeWorkRequestBuilder<PreQueueBacktestWorker>()
@@ -175,7 +186,11 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             }
         }
 
-        if(out.isNotEmpty()) dao.upsertPreQueueSnapshots(out)
+        if(out.isNotEmpty()){
+            dao.upsertPreQueueSnapshots(out)
+        }else{
+            markUnavailable(insCode,date)
+        }
     }
 
     private suspend fun markUnavailable(insCode:String,date:Int){

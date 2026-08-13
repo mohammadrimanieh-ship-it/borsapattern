@@ -13,17 +13,17 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
     override suspend fun doWork():Result=coroutineScope{
         val modelVersion=prefs.getInt("analysis_model_version",0)
-        if(modelVersion<5){
+        if(modelVersion<6){
             prefs.edit()
                 .putBoolean("analysis_running",true)
-                .putString("analysis_status","بازسازی مدل صف پایدار و حذف صف‌های لحظه‌ای")
+                .putString("analysis_status","بازسازی مدل صف پایدار و ترمیم زنجیره تحلیل")
                 .apply()
             val db=(applicationContext as BorsaApp).db
             db.openHelper.writableDatabase.execSQL("DELETE FROM prequeue_snapshots")
             PatternEngine.rebuildCandidates(db)
             applicationContext.getSharedPreferences("prequeue_backtest",Context.MODE_PRIVATE)
                 .edit().clear().apply()
-            prefs.edit().putInt("analysis_model_version",5).apply()
+            prefs.edit().putInt("analysis_model_version",6).apply()
         }else{
             PatternEngine.seedInitialEvents((applicationContext as BorsaApp).db)
         }
@@ -40,8 +40,12 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .putBoolean("analysis_running",false)
                 .putInt("analysis_batch_done",0)
                 .putInt("analysis_batch_total",0)
-                .putString("analysis_status","تحلیل دسته‌های انتخاب‌شده کامل شد")
+                .putString(
+                    "analysis_status",
+                    "صف روز اول کامل است؛ بررسی خودکار نتیجه روز کاری بعد شروع شد"
+                )
                 .apply()
+            enqueueNextDay()
             return@coroutineScope Result.success()
         }
 
@@ -104,14 +108,7 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .putString("analysis_status","تحلیل صف‌ها کامل شد؛ بررسی خودکار روز معاملاتی بعد شروع شد")
                 .apply()
 
-            val nextDay=OneTimeWorkRequestBuilder<NextDayQueueWorker>()
-                .setConstraints(HistoricalWorker.networkConstraint())
-                .build()
-            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-                NextDayQueueWorker.CHAIN,
-                ExistingWorkPolicy.REPLACE,
-                nextDay
-            )
+            enqueueNextDay()
         }
 
         Result.success()
@@ -287,6 +284,17 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
         }catch(_:Exception){
             dao.upsertEvents(listOf(e.copy(status="ERROR")))
         }
+    }
+
+    private fun enqueueNextDay(){
+        val req=OneTimeWorkRequestBuilder<NextDayQueueWorker>()
+            .setConstraints(HistoricalWorker.networkConstraint())
+            .build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            NextDayQueueWorker.CHAIN,
+            ExistingWorkPolicy.REPLACE,
+            req
+        )
     }
 
     companion object{

@@ -236,6 +236,13 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                 )
                 .apply()
 
+            applicationContext.getSharedPreferences(
+                "analysis_pipeline",Context.MODE_PRIVATE
+            ).edit()
+                .putBoolean("enabled",true)
+                .putString("stage","DAY1")
+                .apply()
+
             val analysis=OneTimeWorkRequestBuilder<QueueAnalysisWorker>()
                 .setConstraints(networkConstraint())
                 .setInputData(workDataOf(

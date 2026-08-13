@@ -11,45 +11,78 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     private val prefs get()=applicationContext.getSharedPreferences("nextday",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result=coroutineScope{
-        val items=dao.pendingNextDayChecks(40)
+        val totalPendingBefore=dao.nextDayPendingCount()
+        val completedBefore=dao.nextDayCompletedCount()
+        val items=dao.pendingNextDayChecks(48)
+
         if(items.isEmpty()){
-            prefs.edit().putString("status","بررسی روز معاملاتی بعد کامل شد؛ Walk-Forward شروع شد").apply()
-            QueuePatternLearningEngine.rebuild(applicationContext)
-            val pre=OneTimeWorkRequestBuilder<PreQueueBacktestWorker>()
-                .setConstraints(HistoricalWorker.networkConstraint())
-                .setInputData(workDataOf("batch" to 24))
-                .build()
-            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-                PreQueueBacktestWorker.CHAIN,
-                ExistingWorkPolicy.REPLACE,
-                pre
-            )
+            finishNextDayStage()
             return@coroutineScope Result.success()
         }
-        prefs.edit().putString("status","در حال بررسی ماندگاری صف روز بعد").apply()
-        for(chunk in items.chunked(3)){
-            chunk.map{e->async(Dispatchers.IO){checkOne(e)}}.awaitAll()
+
+        prefs.edit()
+            .putBoolean("running",true)
+            .putInt("total",totalPendingBefore+completedBefore)
+            .putInt("done",completedBefore)
+            .putString(
+                "status",
+                "نتیجه روز کاری بعد: $completedBefore از ${totalPendingBefore+completedBefore}"
+            )
+            .apply()
+
+        var processed=0
+        for(chunk in items.chunked(4)){
+            chunk.map{e->
+                async(Dispatchers.IO){
+                    checkOne(e)
+                }
+            }.awaitAll()
+            processed += chunk.size
+
+            val pending=dao.nextDayPendingCount()
+            val done=dao.nextDayCompletedCount()
+            prefs.edit()
+                .putInt("done",done)
+                .putInt("total",done+pending)
+                .putString("status","نتیجه روز کاری بعد: $done از ${done+pending}")
+                .apply()
+            setProgress(workDataOf("done" to done,"total" to done+pending))
         }
-        if(dao.pendingNextDayChecks(1).isNotEmpty()){
-            val n=OneTimeWorkRequestBuilder<NextDayQueueWorker>()
+
+        if(dao.nextDayPendingCount()>0){
+            val req=OneTimeWorkRequestBuilder<NextDayQueueWorker>()
                 .setConstraints(HistoricalWorker.networkConstraint())
-                .setInitialDelay(3,TimeUnit.SECONDS).build()
-            WorkManager.getInstance(applicationContext)
-                .enqueueUniqueWork(CHAIN,ExistingWorkPolicy.APPEND_OR_REPLACE,n)
-        } else {
-            prefs.edit().putString("status","بررسی روز معاملاتی بعد کامل شد؛ Walk-Forward شروع شد").apply()
-            QueuePatternLearningEngine.rebuild(applicationContext)
-            val pre=OneTimeWorkRequestBuilder<PreQueueBacktestWorker>()
-                .setConstraints(HistoricalWorker.networkConstraint())
-                .setInputData(workDataOf("batch" to 24))
+                .setInitialDelay(2,TimeUnit.SECONDS)
                 .build()
             WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-                PreQueueBacktestWorker.CHAIN,
-                ExistingWorkPolicy.REPLACE,
-                pre
+                CHAIN,ExistingWorkPolicy.APPEND_OR_REPLACE,req
             )
+        }else{
+            finishNextDayStage()
         }
         Result.success()
+    }
+
+    private suspend fun finishNextDayStage(){
+        val done=dao.nextDayCompletedCount()
+        prefs.edit()
+            .putBoolean("running",false)
+            .putInt("done",done)
+            .putInt("total",done)
+            .putString("status","نتیجه روز کاری بعد کامل شد؛ Walk-Forward شروع شد")
+            .apply()
+
+        QueuePatternLearningEngine.rebuild(applicationContext)
+
+        val pre=OneTimeWorkRequestBuilder<PreQueueBacktestWorker>()
+            .setConstraints(HistoricalWorker.networkConstraint())
+            .setInputData(workDataOf("batch" to 24))
+            .build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            PreQueueBacktestWorker.CHAIN,
+            ExistingWorkPolicy.REPLACE,
+            pre
+        )
     }
 
     private suspend fun checkOne(e:QueueEventEntity){
@@ -58,17 +91,22 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             return
         }
 
+        val nextLast=next.last
+        val nextYesterday=next.yesterday
+        val returnPct=if(
+            nextLast!=null && nextYesterday!=null && nextYesterday>0
+        ) (nextLast/nextYesterday-1.0)*100.0 else null
+
         if(PatternEngine.isLikelySpecialReopen(dao,e.insCode,next.date)){
-            val specialLast=next.last
-            val specialYesterday=next.yesterday
-            val specialReturn=if(
-                specialLast!=null && specialYesterday!=null && specialYesterday>0
-            ) (specialLast/specialYesterday-1.0)*100.0 else null
             dao.updateNextDayResult(
-                e.insCode,e.date,next.date,"NEXT_DAY_SPECIAL_REOPEN",specialReturn
+                e.insCode,e.date,next.date,"NEXT_DAY_SPECIAL_REOPEN",returnPct
             )
             return
         }
+
+        var preopenOk=false
+        var intradayOk=false
+        var bookAvailable=false
 
         try{
             val arr=withTimeout(15_000L){
@@ -77,11 +115,9 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     "bestLimitsHistory","bestLimits"
                 )
             }
+            bookAvailable=arr.length()>0
             val high=next.high ?: 0.0
-            var preopenOk=false
-            var intradayOk=false
 
-            // Day 2 rule: preopen queue is the strongest confirmation.
             for(i in 0 until arr.length()){
                 val o=arr.optJSONObject(i)?:continue
                 val rowTime=firstInt(o,"hEven","time") ?: continue
@@ -103,27 +139,25 @@ class NextDayQueueWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     intradayOk=true
                 }
             }
+        }catch(_:Exception){
+            // Important: a historical BestLimits outage must not keep this row
+            // PENDING forever. Daily return is still enough for the integrated outcome.
+        }
 
-            val nextLast=next.last
-            val nextYesterday=next.yesterday
-            val returnPct=if(
-                nextLast!=null && nextYesterday!=null && nextYesterday>0
-            ) (nextLast/nextYesterday-1.0)*100.0 else null
+        val result=when{
+            preopenOk -> "PREOPEN_QUEUE_NEXT_DAY"
+            intradayOk -> "QUEUE_AGAIN"
+            returnPct!=null && returnPct>=2.0 -> "POSITIVE_STRONG_NEXT_DAY"
+            returnPct!=null && returnPct>0.0 -> "POSITIVE_NEXT_DAY"
+            returnPct!=null && returnPct>=-0.5 -> "FLAT_NEXT_DAY"
+            returnPct!=null -> "NEGATIVE_NEXT_DAY"
+            bookAvailable -> "NOT_QUEUE_NEXT_DAY"
+            else -> "NEXT_DAY_DAILY_ONLY"
+        }
 
-            val result=when{
-                preopenOk -> "PREOPEN_QUEUE_NEXT_DAY"
-                intradayOk -> "QUEUE_AGAIN"
-                returnPct!=null && returnPct>=2.0 -> "POSITIVE_STRONG_NEXT_DAY"
-                returnPct!=null && returnPct>0.0 -> "POSITIVE_NEXT_DAY"
-                returnPct!=null && returnPct>=-0.5 -> "FLAT_NEXT_DAY"
-                returnPct!=null -> "NEGATIVE_NEXT_DAY"
-                else -> "NOT_QUEUE_NEXT_DAY"
-            }
-
-            dao.updateNextDayResult(
-                e.insCode,e.date,next.date,result,returnPct
-            )
-        }catch(_:Exception){}
+        dao.updateNextDayResult(
+            e.insCode,e.date,next.date,result,returnPct
+        )
     }
 
     companion object{const val CHAIN="next_day_queue_chain"}

@@ -137,6 +137,40 @@ interface BorsaDao {
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='FRAGILE_QUEUE'") suspend fun fragileQueueCount():Int
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='NOT_QUEUE'") suspend fun rejectedCount():Int
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='ERROR'") suspend fun errorCount():Int
+
+    @Query("""
+      SELECT COUNT(*) FROM queue_events e
+      INNER JOIN symbols s ON s.insCode=e.insCode
+      WHERE e.status='ERROR'
+        AND s.segment IN (:segments)
+        AND s.instrumentType IN (:types)
+    """)
+    suspend fun errorCountFor(segments:List<String>,types:List<String>):Int
+
+    @Query("""
+      SELECT COUNT(*) FROM queue_events
+      WHERE status='QUEUE_CONFIRMED' AND nextDayQueueStatus='PENDING'
+    """)
+    suspend fun nextDayPendingCount():Int
+
+    @Query("""
+      SELECT COUNT(*) FROM queue_events
+      WHERE status='QUEUE_CONFIRMED' AND nextDayQueueStatus!='PENDING'
+    """)
+    suspend fun nextDayCompletedCount():Int
+
+    @Query("""
+      SELECT COUNT(*) FROM queue_events
+      WHERE status IN ('QUEUE_CONFIRMED','NOT_QUEUE','FRAGILE_QUEUE')
+    """)
+    suspend fun walkForwardEligibleCount():Int
+
+    @Query("""
+      SELECT COUNT(*) FROM (
+        SELECT DISTINCT insCode,date FROM prequeue_snapshots
+      )
+    """)
+    suspend fun walkForwardProcessedCount():Int
     @Query("SELECT MAX(date) FROM daily") suspend fun latestMarketDate():Int?
     @Query("SELECT MAX(date) FROM daily WHERE insCode=:insCode") suspend fun latestDateFor(insCode:String):Int?
     @Query("SELECT MIN(date) FROM daily WHERE insCode=:insCode") suspend fun earliestDateFor(insCode:String):Int?
