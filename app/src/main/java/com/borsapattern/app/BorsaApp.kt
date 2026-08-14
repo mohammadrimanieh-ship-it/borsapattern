@@ -142,12 +142,8 @@ class BorsaApp:Application(){
 
         scheduleBackgroundWork()
 
-        val monitorPrefs=getSharedPreferences(
-            MarketMonitorService.PREFS,MODE_PRIVATE
-        )
-        if(monitorPrefs.getBoolean("background_enabled",false)){
-            runCatching{MarketMonitorService.start(this)}
-        }
+        // Foreground monitor is started only after MainActivity is visible.
+        // WorkManager remains the watchdog between sessions.
     }
 
     private fun scheduleBackgroundWork(){

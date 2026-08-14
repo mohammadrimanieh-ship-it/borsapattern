@@ -20,10 +20,19 @@ class MarketMonitorService:Service(){
             .putBoolean("service_running",true)
             .apply()
 
-        startForeground(NOTIFICATION_ID,notification("پایش بازار فعال"))
-        scope.coroutineContext.cancelChildren()
-        scope.launch{monitorLoop()}
-        return START_STICKY
+        return try{
+            startForeground(NOTIFICATION_ID,notification("پایش بازار فعال"))
+            scope.coroutineContext.cancelChildren()
+            scope.launch{monitorLoop()}
+            START_STICKY
+        }catch(e:Exception){
+            getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+                .putBoolean("service_running",false)
+                .putString("service_error",e.javaClass.simpleName+":"+e.message)
+                .apply()
+            stopSelf()
+            START_NOT_STICKY
+        }
     }
 
     private suspend fun monitorLoop(){

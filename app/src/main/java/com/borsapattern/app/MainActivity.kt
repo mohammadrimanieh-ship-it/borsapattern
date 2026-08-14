@@ -278,9 +278,11 @@ class MainActivity:ComponentActivity(){
 
         LaunchedEffect(liveEnabled){
             if(liveEnabled){
-                runCatching{MarketMonitorService.start(this@MainActivity)}
+                if(MarketClock.isLiveWindow() || MarketClock.phase().contains("پیش")){
+                    runCatching{MarketMonitorService.start(this@MainActivity)}
+                }
             }else{
-                MarketMonitorService.stop(this@MainActivity)
+                runCatching{MarketMonitorService.stop(this@MainActivity)}
             }
         }
 
@@ -314,7 +316,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.9.1-test",
+                                    "Signal • v2.9.2-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -553,7 +555,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.9.1-test",
+                        "v2.9.2-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp

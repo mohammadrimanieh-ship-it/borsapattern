@@ -67,7 +67,9 @@ data class LiveScoreEntity(
     val actorScore:Double=0.0,
     val lastPrice:Double=0.0,
     val firstAlertAt:Long?=null,
+    @ColumnInfo(defaultValue="'WATCH'")
     val alertLevel:String="WATCH",
+    @ColumnInfo(defaultValue="0")
     val sessionDate:Int=0,
     val queueDetectedAt:Long?=null,
     val leadSeconds:Int?=null

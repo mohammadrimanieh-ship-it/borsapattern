@@ -1,0 +1,11 @@
+Signal v2.9.2-test
+
+رفع مشکل بسته شدن برنامه هنگام ورود:
+- هماهنگی Room Migration 8->9 با defaultValue ستون‌های جدید live_scores
+- حذف شروع Foreground Service از Application.onCreate
+- شروع سرویس فقط بعد از نمایش Activity و در ساعت بازار/پیش‌گشایش
+- جلوگیری از Crash کل برنامه در صورت خطای startForeground
+- اطلاعات نسخه قبلی و دیتابیس حفظ می‌شوند
+
+versionCode=38
+versionName=2.9.2-test
