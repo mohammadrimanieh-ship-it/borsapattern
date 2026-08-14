@@ -1,0 +1,9 @@
+Signal v2.9.1-test
+
+Build Fix:
+- رفع خطای MarketMonitorService.kt مربوط به isActive
+- while(isActive) به currentCoroutineContext().isActive تغییر کرد
+- منطق پایش پس‌زمینه و الگوریتم v2.9 بدون تغییر باقی مانده است
+
+versionCode=37
+versionName=2.9.1-test

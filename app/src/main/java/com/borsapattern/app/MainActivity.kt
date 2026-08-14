@@ -314,7 +314,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.9-test",
+                                    "Signal • v2.9.1-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -553,7 +553,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.9-test",
+                        "v2.9.1-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp

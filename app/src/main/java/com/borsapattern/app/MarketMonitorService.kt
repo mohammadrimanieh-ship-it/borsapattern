@@ -27,7 +27,7 @@ class MarketMonitorService:Service(){
     }
 
     private suspend fun monitorLoop(){
-        while(isActive){
+        while(kotlinx.coroutines.currentCoroutineContext().isActive){
             val prefs=getSharedPreferences(PREFS,MODE_PRIVATE)
             if(!prefs.getBoolean("background_enabled",true)){
                 stopSelf()
