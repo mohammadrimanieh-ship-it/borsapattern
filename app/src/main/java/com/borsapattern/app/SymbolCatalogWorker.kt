@@ -123,8 +123,9 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 }
             }
 
-            // بازار نامشخص فقط برای عیب‌یابی است و تا تکمیل متادیتا وارد Universe نمی‌شود.
-            val eligible=bourse+farabourse+base+leveraged
+            // نماد stock-like با بازار موقتاً نامشخص از تحلیل حذف نمی‌شود؛
+            // تا زمان تکمیل متادیتا به عنوان provisional نگه داشته می‌شود.
+            val eligible=bourse+farabourse+base+leveraged+unknownStockLike
 
             prefs.edit()
                 .putBoolean("running",false)
@@ -140,11 +141,11 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .putString(
                     "status",
                     if(finalizeOnly && unknownStockLike>0)
-                        "به‌روزرسانی تمام شد: $eligible معتبر؛ $unknownStockLike نماد هنوز متادیتای کافی ندارند"
+                        "به‌روزرسانی تمام شد: $eligible قابل تحلیل؛ $unknownStockLike مورد provisional در انتظار تکمیل بازار"
                     else if(finalizeOnly)
                         "به‌روزرسانی نمادها کامل شد: $eligible نماد معتبر"
                     else if(unknownStockLike>0)
-                        "در حال تکمیل خودکار نام/بازار؛ $eligible نماد فعلاً معتبر"
+                        "در حال تکمیل خودکار نام/بازار؛ $eligible نماد فعلاً قابل تحلیل"
                     else
                         "فهرست اولیه آماده شد: $eligible نماد معتبر"
                 )

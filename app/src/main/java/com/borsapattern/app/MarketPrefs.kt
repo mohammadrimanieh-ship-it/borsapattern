@@ -127,6 +127,15 @@ object MarketPrefs {
         // Leveraged ETFs are allowed even if TSETMC board metadata is temporarily missing;
         // their fund identity is independently recognized.
         if(leveraged) return true
+
+        // A stock-like symbol with temporarily missing board metadata stays
+        // analyzable. Excluded instrument types are already classified above.
+        val provisionalStock=
+            segment==OTHER &&
+            instrumentType==TYPE_STOCK &&
+            !symbol.isNullOrBlank()
+
+        if(provisionalStock) return true
         if(!allowedMarket) return false
 
         return instrumentType==TYPE_STOCK ||

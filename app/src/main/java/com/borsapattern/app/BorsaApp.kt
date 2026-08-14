@@ -15,7 +15,7 @@ class BorsaApp:Application(){
         db=Room.databaseBuilder(this,AppDatabase::class.java,"borsa.db")
             .addMigrations(
                 MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,
-                MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8
+                MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9
             )
             .build()
         Notifications.createChannel(this)
@@ -93,6 +93,41 @@ class BorsaApp:Application(){
             )
         }
 
+        val v29State=getSharedPreferences("app_state",MODE_PRIVATE)
+        if(!v29State.getBoolean("v29_upgrade_done",false)){
+            val monitorPrefsV29=getSharedPreferences(
+                MarketMonitorService.PREFS,MODE_PRIVATE
+            )
+            if(!monitorPrefsV29.contains("background_enabled")){
+                monitorPrefsV29.edit().putBoolean("background_enabled",true).apply()
+            }
+
+            // Metadata/catalog repair only; no full historical redownload.
+            val metaRepair=OneTimeWorkRequestBuilder<MetadataWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInputData(workDataOf("batch" to 120,"round" to 0))
+                .build()
+            WorkManager.getInstance(this).enqueueUniqueWork(
+                MetadataWorker.CHAIN,
+                ExistingWorkPolicy.REPLACE,
+                metaRepair
+            )
+
+            // Existing Walk-Forward snapshots are reused. If already complete,
+            // this worker only recalculates the new lead-time summary locally.
+            val leadRepair=OneTimeWorkRequestBuilder<PreQueueBacktestWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInputData(workDataOf("batch" to 24))
+                .build()
+            WorkManager.getInstance(this).enqueueUniqueWork(
+                PreQueueBacktestWorker.CHAIN,
+                ExistingWorkPolicy.KEEP,
+                leadRepair
+            )
+
+            v29State.edit().putBoolean("v29_upgrade_done",true).apply()
+        }
+
         val pipelineState=getSharedPreferences("analysis_pipeline",MODE_PRIVATE)
         if(pipelineState.getBoolean("enabled",false)){
             val repair=OneTimeWorkRequestBuilder<PipelineCoordinatorWorker>()
@@ -106,6 +141,13 @@ class BorsaApp:Application(){
         }
 
         scheduleBackgroundWork()
+
+        val monitorPrefs=getSharedPreferences(
+            MarketMonitorService.PREFS,MODE_PRIVATE
+        )
+        if(monitorPrefs.getBoolean("background_enabled",false)){
+            runCatching{MarketMonitorService.start(this)}
+        }
     }
 
     private fun scheduleBackgroundWork(){
@@ -218,6 +260,15 @@ class BorsaApp:Application(){
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN queueEndHeld INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN queueValueRetention REAL NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN nextDayReturnPct REAL")
+            }
+        }
+        val MIGRATION_8_9=object:Migration(8,9){
+            override fun migrate(db:SupportSQLiteDatabase){
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN firstAlertAt INTEGER")
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN alertLevel TEXT NOT NULL DEFAULT 'WATCH'")
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN sessionDate INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN queueDetectedAt INTEGER")
+                db.execSQL("ALTER TABLE live_scores ADD COLUMN leadSeconds INTEGER")
             }
         }
     }
