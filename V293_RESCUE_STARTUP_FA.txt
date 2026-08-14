@@ -1,0 +1,14 @@
+Signal v2.9.3-test — Rescue Startup
+
+این نسخه مخصوص رفع Crash بلافاصله بعد از لمس آیکون است.
+
+تغییرات:
+- Room database به version 10 ارتقا یافت.
+- Migration 9->10 فقط live_scores را بازسازی می‌کند.
+- daily / queue_events / prequeue_snapshots و کل داده تاریخی حفظ می‌شوند.
+- هیچ Worker در Application.onCreate اجرا نمی‌شود تا شروع UI امن باشد.
+- Queryهای اولیه MainActivity داخل try/catch هستند.
+- حتی اگر Room خطا بدهد، برنامه باید باز بماند و متن خطا را داخل خود UI نشان دهد.
+
+versionCode=39
+versionName=2.9.3-test

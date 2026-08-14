@@ -94,6 +94,7 @@ class MainActivity:ComponentActivity(){
         }
         var lastLiveScan by remember{mutableStateOf<Long?>(null)}
         var showMarkets by remember{mutableStateOf(false)}
+        var startupError by remember{mutableStateOf<String?>(null)}
 
         var syncStatus by remember{mutableStateOf("آماده")}
         var syncDone by remember{mutableStateOf(0)}
@@ -151,96 +152,101 @@ class MainActivity:ComponentActivity(){
 
         LaunchedEffect(Unit){
             while(true){
-                val segs=MarketPrefs.selectedSegments(this@MainActivity).toList()
-                val types=MarketPrefs.selectedTypes(this@MainActivity).toList()
-                symbols=app.db.dao().symbolCount()
-                records=app.db.dao().dailyCount()
-                val prefEligible=catalogPrefs.getInt("eligible_count",-1)
-                eligibleCount=if(prefEligible>=0) prefEligible else app.db.dao().allSymbols().count{
-                    val effectiveType=MarketPrefs.classifyType(
-                        it.symbol,it.name,it.flow,it.boardTitle
-                    )
-                    val derivedSegment=MarketPrefs.classify(it.flow,it.boardTitle)
-                    val effectiveSegment=if(derivedSegment==MarketPrefs.OTHER) it.segment else derivedSegment
-                    val stockLike=
-                        effectiveType==MarketPrefs.TYPE_STOCK ||
-                        effectiveType==MarketPrefs.TYPE_BASE ||
-                        (
-                            effectiveType==MarketPrefs.TYPE_FUND &&
-                            MarketPrefs.isLeveragedFund(it.symbol,it.name)
+                try{
+                    val segs=MarketPrefs.selectedSegments(this@MainActivity).toList()
+                    val types=MarketPrefs.selectedTypes(this@MainActivity).toList()
+                    symbols=app.db.dao().symbolCount()
+                    records=app.db.dao().dailyCount()
+                    val prefEligible=catalogPrefs.getInt("eligible_count",-1)
+                    eligibleCount=if(prefEligible>=0) prefEligible else app.db.dao().allSymbols().count{
+                        val effectiveType=MarketPrefs.classifyType(
+                            it.symbol,it.name,it.flow,it.boardTitle
                         )
-                    stockLike && (
-                        effectiveSegment==MarketPrefs.OTHER ||
-                        MarketPrefs.selectedSegments(this@MainActivity).contains(effectiveSegment)
-                    )
+                        val derivedSegment=MarketPrefs.classify(it.flow,it.boardTitle)
+                        val effectiveSegment=if(derivedSegment==MarketPrefs.OTHER) it.segment else derivedSegment
+                        val stockLike=
+                            effectiveType==MarketPrefs.TYPE_STOCK ||
+                            effectiveType==MarketPrefs.TYPE_BASE ||
+                            (
+                                effectiveType==MarketPrefs.TYPE_FUND &&
+                                MarketPrefs.isLeveragedFund(it.symbol,it.name)
+                            )
+                        stockLike && (
+                            effectiveSegment==MarketPrefs.OTHER ||
+                            MarketPrefs.selectedSegments(this@MainActivity).contains(effectiveSegment)
+                        )
+                    }
+                    candidates=app.db.dao().candidateCount()
+                    confirmed=app.db.dao().confirmedCount()
+                    rejected=app.db.dao().rejectedCount()
+                    errors=app.db.dao().errorCount()
+                    latest=app.db.dao().latestMarketDate()
+                    scores=app.db.dao().topSignalScores()
+                    history=app.db.dao().confirmedHistoryFor(segs,types,5000)
+                    trades=app.db.dao().recentPaperTrades(100)
+                    specialReopenCount=app.db.dao().specialReopenCount()
+                    preopenDay1Excluded=app.db.dao().preopenDay1ExcludedCount()
+                    twoDayQueueCount=app.db.dao().twoDayQueueCount()
+                    positiveContinuationCount=app.db.dao().positiveContinuationCount()
+                    strongPreopenNextDay=app.db.dao().strongPreopenNextDayCount()
+                    fragileQueueCount=app.db.dao().fragileQueueCount()
+                    avgPersistence=app.db.dao().averagePersistenceRatio() ?: 0.0
+                    avgQueueDuration=app.db.dao().averageQueueDuration() ?: 0.0
+
+                    learnedKnown=queueLearningPrefs.getInt("total_known",0)
+                    learnedSuccess=queueLearningPrefs.getInt("success_count",0)
+                    learnedRate=queueLearningPrefs.getFloat("success_rate",0f)
+                    learnedBestBucket=queueLearningPrefs.getString("best_bucket","داده کافی نیست")?:"داده کافی نیست"
+                    learnedBestBucketRate=queueLearningPrefs.getFloat("best_bucket_rate",0f)
+                    learnedMedianTime=queueLearningPrefs.getInt("median_success_time",0)
+                    learnedMedianQueueValue=queueLearningPrefs.getLong("median_success_queue_value",0L)
+                    learnedAvgScore=queueLearningPrefs.getFloat("avg_success_score",0f)
+
+                    preQueueStatus=preQueuePrefs.getString("status","آماده")?:"آماده"
+                    detect30=preQueuePrefs.getFloat("rate_30",0f)
+                    detect20=preQueuePrefs.getFloat("rate_20",0f)
+                    detect15=preQueuePrefs.getFloat("rate_15",0f)
+                    detect10=preQueuePrefs.getFloat("rate_10",0f)
+                    detect5=preQueuePrefs.getFloat("rate_5",0f)
+                    falsePositiveRate=preQueuePrefs.getFloat("false_positive_rate",0f)
+                    precisionRate=preQueuePrefs.getFloat("precision",0f)
+                    preQueueSnapshots=preQueuePrefs.getInt("snapshot_count",0)
+                    lead30=preQueuePrefs.getFloat("lead_rate_30",0f)
+                    lead20=preQueuePrefs.getFloat("lead_rate_20",0f)
+                    lead15=preQueuePrefs.getFloat("lead_rate_15",0f)
+                    lead10=preQueuePrefs.getFloat("lead_rate_10",0f)
+                    lead5=preQueuePrefs.getFloat("lead_rate_5",0f)
+                    leadNever=preQueuePrefs.getFloat("lead_never_rate",0f)
+                    leadAverage=preQueuePrefs.getFloat("lead_average_minutes",0f)
+
+                    liveEnabled=monitorPrefs.getBoolean("background_enabled",liveEnabled)
+                    val ls=livePrefs.getLong("last_scan",0L)
+                    lastLiveScan=ls.takeIf{it>0L}
+
+                    syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
+                    syncDone=syncPrefs.getInt("sync_done",0)
+                    syncTotal=syncPrefs.getInt("sync_total",0)
+                    analysisStatus=analysisPrefs.getString("analysis_status","آماده")?:"آماده"
+                    analysisDone=analysisPrefs.getInt("analysis_batch_done",0)
+                    analysisTotal=analysisPrefs.getInt("analysis_batch_total",0)
+                    metadataStatus=metaPrefs.getString("status","آماده")?:"آماده"
+                    nextDayStatus=nextPrefs.getString("status","آماده")?:"آماده"
+                    nextDayDone=nextPrefs.getInt("done",0)
+                    nextDayTotal=nextPrefs.getInt("total",0)
+                    walkDone=preQueuePrefs.getInt("events_done",0)
+                    walkTotal=preQueuePrefs.getInt("events_total",0)
+                    catalogStatus=catalogPrefs.getString("status","در حال آماده‌سازی فهرست نمادها")?:"در حال آماده‌سازی فهرست نمادها"
+                    catalogRaw=catalogPrefs.getInt("raw_count",0)
+                    catalogBourse=catalogPrefs.getInt("bourse_count",0)
+                    catalogFarabourse=catalogPrefs.getInt("farabourse_count",0)
+                    catalogBase=catalogPrefs.getInt("base_count",0)
+                    catalogLeveraged=catalogPrefs.getInt("leveraged_count",0)
+                    catalogUnknown=catalogPrefs.getInt("unknown_count",0)
+                    catalogExcluded=catalogPrefs.getInt("excluded_count",0)
+                    startupError=null
+                }catch(e:Throwable){
+                    startupError=e.javaClass.simpleName+": "+(e.message ?: "خطای دیتابیس")
                 }
-                candidates=app.db.dao().candidateCount()
-                confirmed=app.db.dao().confirmedCount()
-                rejected=app.db.dao().rejectedCount()
-                errors=app.db.dao().errorCount()
-                latest=app.db.dao().latestMarketDate()
-                scores=app.db.dao().topSignalScores()
-                history=app.db.dao().confirmedHistoryFor(segs,types,5000)
-                trades=app.db.dao().recentPaperTrades(100)
-                specialReopenCount=app.db.dao().specialReopenCount()
-                preopenDay1Excluded=app.db.dao().preopenDay1ExcludedCount()
-                twoDayQueueCount=app.db.dao().twoDayQueueCount()
-                positiveContinuationCount=app.db.dao().positiveContinuationCount()
-                strongPreopenNextDay=app.db.dao().strongPreopenNextDayCount()
-                fragileQueueCount=app.db.dao().fragileQueueCount()
-                avgPersistence=app.db.dao().averagePersistenceRatio() ?: 0.0
-                avgQueueDuration=app.db.dao().averageQueueDuration() ?: 0.0
-
-                learnedKnown=queueLearningPrefs.getInt("total_known",0)
-                learnedSuccess=queueLearningPrefs.getInt("success_count",0)
-                learnedRate=queueLearningPrefs.getFloat("success_rate",0f)
-                learnedBestBucket=queueLearningPrefs.getString("best_bucket","داده کافی نیست")?:"داده کافی نیست"
-                learnedBestBucketRate=queueLearningPrefs.getFloat("best_bucket_rate",0f)
-                learnedMedianTime=queueLearningPrefs.getInt("median_success_time",0)
-                learnedMedianQueueValue=queueLearningPrefs.getLong("median_success_queue_value",0L)
-                learnedAvgScore=queueLearningPrefs.getFloat("avg_success_score",0f)
-
-                preQueueStatus=preQueuePrefs.getString("status","آماده")?:"آماده"
-                detect30=preQueuePrefs.getFloat("rate_30",0f)
-                detect20=preQueuePrefs.getFloat("rate_20",0f)
-                detect15=preQueuePrefs.getFloat("rate_15",0f)
-                detect10=preQueuePrefs.getFloat("rate_10",0f)
-                detect5=preQueuePrefs.getFloat("rate_5",0f)
-                falsePositiveRate=preQueuePrefs.getFloat("false_positive_rate",0f)
-                precisionRate=preQueuePrefs.getFloat("precision",0f)
-                preQueueSnapshots=preQueuePrefs.getInt("snapshot_count",0)
-                lead30=preQueuePrefs.getFloat("lead_rate_30",0f)
-                lead20=preQueuePrefs.getFloat("lead_rate_20",0f)
-                lead15=preQueuePrefs.getFloat("lead_rate_15",0f)
-                lead10=preQueuePrefs.getFloat("lead_rate_10",0f)
-                lead5=preQueuePrefs.getFloat("lead_rate_5",0f)
-                leadNever=preQueuePrefs.getFloat("lead_never_rate",0f)
-                leadAverage=preQueuePrefs.getFloat("lead_average_minutes",0f)
-
-                liveEnabled=monitorPrefs.getBoolean("background_enabled",liveEnabled)
-                val ls=livePrefs.getLong("last_scan",0L)
-                lastLiveScan=ls.takeIf{it>0L}
-
-                syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
-                syncDone=syncPrefs.getInt("sync_done",0)
-                syncTotal=syncPrefs.getInt("sync_total",0)
-                analysisStatus=analysisPrefs.getString("analysis_status","آماده")?:"آماده"
-                analysisDone=analysisPrefs.getInt("analysis_batch_done",0)
-                analysisTotal=analysisPrefs.getInt("analysis_batch_total",0)
-                metadataStatus=metaPrefs.getString("status","آماده")?:"آماده"
-                nextDayStatus=nextPrefs.getString("status","آماده")?:"آماده"
-                nextDayDone=nextPrefs.getInt("done",0)
-                nextDayTotal=nextPrefs.getInt("total",0)
-                walkDone=preQueuePrefs.getInt("events_done",0)
-                walkTotal=preQueuePrefs.getInt("events_total",0)
-                catalogStatus=catalogPrefs.getString("status","در حال آماده‌سازی فهرست نمادها")?:"در حال آماده‌سازی فهرست نمادها"
-                catalogRaw=catalogPrefs.getInt("raw_count",0)
-                catalogBourse=catalogPrefs.getInt("bourse_count",0)
-                catalogFarabourse=catalogPrefs.getInt("farabourse_count",0)
-                catalogBase=catalogPrefs.getInt("base_count",0)
-                catalogLeveraged=catalogPrefs.getInt("leveraged_count",0)
-                catalogUnknown=catalogPrefs.getInt("unknown_count",0)
-                catalogExcluded=catalogPrefs.getInt("excluded_count",0)
                 delay(1200)
             }
         }
@@ -316,7 +322,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.9.2-test",
+                                    "Signal • v2.9.3-test",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -386,7 +392,19 @@ class MainActivity:ComponentActivity(){
                         .padding(padding)
                         .padding(horizontal=12.dp)
                 ){
-                    when(section){
+                    if(startupError!=null){
+                        Card(
+                            modifier=Modifier.fillMaxWidth().padding(top=16.dp),
+                            colors=CardDefaults.cardColors(containerColor=Color(0xFFFFF2F2)),
+                            shape=RoundedCornerShape(18.dp)
+                        ){
+                            Column(Modifier.padding(16.dp)){
+                                Text("برنامه باز شد — دیتابیس نیاز به ترمیم دارد",fontWeight=FontWeight.Black)
+                                Text(startupError ?: "",fontSize=10.sp,color=Color(0xFF9B4B4B))
+                                Text("اطلاعات تاریخی حذف نشده‌اند.",fontSize=10.sp,color=Color.Gray)
+                            }
+                        }
+                    }else when(section){
                         0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
                         1 -> DailyBacktest(
                             history=history,
@@ -555,7 +573,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.9.2-test",
+                        "v2.9.3-test",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp

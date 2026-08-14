@@ -521,6 +521,6 @@ interface BorsaDao {
         PreQueueSnapshotEntity::class,
         LiveScoreEntity::class,PaperTradeEntity::class
     ],
-    version=9,exportSchema=false
+    version=10,exportSchema=false
 )
 abstract class AppDatabase:RoomDatabase(){ abstract fun dao():BorsaDao }
