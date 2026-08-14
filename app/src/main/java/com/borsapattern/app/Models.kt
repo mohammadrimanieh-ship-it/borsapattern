@@ -65,14 +65,7 @@ data class LiveScoreEntity(
     val rsi:Double?=null,
     val macd:Double?=null,
     val actorScore:Double=0.0,
-    val lastPrice:Double=0.0,
-    val firstAlertAt:Long?=null,
-    @ColumnInfo(defaultValue="'WATCH'")
-    val alertLevel:String="WATCH",
-    @ColumnInfo(defaultValue="0")
-    val sessionDate:Int=0,
-    val queueDetectedAt:Long?=null,
-    val leadSeconds:Int?=null
+    val lastPrice:Double=0.0
 )
 
 @Entity(tableName="paper_trades")
@@ -230,15 +223,6 @@ interface BorsaDao {
     """)
     suspend fun liveScoresNeedingName(limit:Int):List<LiveScoreEntity>
 
-    @Query("SELECT * FROM live_scores WHERE insCode=:insCode LIMIT 1")
-    suspend fun liveScoreByCode(insCode:String):LiveScoreEntity?
-
-    @Query("SELECT * FROM live_scores WHERE sessionDate=:date")
-    suspend fun liveScoresForSession(date:Int):List<LiveScoreEntity>
-
-    @Query("DELETE FROM live_scores WHERE sessionDate!=:date")
-    suspend fun clearOldLiveScores(date:Int)
-
     @Query("""
       UPDATE live_scores
       SET symbol=(SELECT COALESCE(NULLIF(symbol,''),NULLIF(name,'')) FROM symbols s WHERE s.insCode=live_scores.insCode)
@@ -259,10 +243,7 @@ interface BorsaDao {
              l.score AS score,l.reason AS reason,l.updatedAt AS updatedAt,
              l.patternScore AS patternScore,l.technicalScore AS technicalScore,
              l.volumeScore AS volumeScore,l.rsi AS rsi,l.macd AS macd,
-             l.actorScore AS actorScore,l.lastPrice AS lastPrice,
-             l.firstAlertAt AS firstAlertAt,l.alertLevel AS alertLevel,
-             l.sessionDate AS sessionDate,
-             l.queueDetectedAt AS queueDetectedAt,l.leadSeconds AS leadSeconds
+             l.actorScore AS actorScore,l.lastPrice AS lastPrice
       FROM live_scores l
       LEFT JOIN symbols s ON s.insCode=l.insCode
       WHERE COALESCE(s.segment,'OTHER') IN (:segments)
@@ -400,14 +381,12 @@ interface BorsaDao {
              l.score AS score,l.reason AS reason,l.updatedAt AS updatedAt,
              l.patternScore AS patternScore,l.technicalScore AS technicalScore,
              l.volumeScore AS volumeScore,l.rsi AS rsi,l.macd AS macd,
-             l.actorScore AS actorScore,l.lastPrice AS lastPrice,
-             l.firstAlertAt AS firstAlertAt,l.alertLevel AS alertLevel,
-             l.sessionDate AS sessionDate,
-             l.queueDetectedAt AS queueDetectedAt,l.leadSeconds AS leadSeconds
+             l.actorScore AS actorScore,l.lastPrice AS lastPrice
       FROM live_scores l
-      LEFT JOIN symbols s ON s.insCode=l.insCode
-      WHERE (
-          COALESCE(s.instrumentType,'TYPE_STOCK') IN ('TYPE_STOCK','TYPE_BASE')
+      INNER JOIN symbols s ON s.insCode=l.insCode
+      WHERE s.segment IN ('BOURSE','FARABOURSE','BASE_YELLOW','BASE_ORANGE','BASE_RED')
+        AND (
+          s.instrumentType IN ('TYPE_STOCK','TYPE_BASE')
           OR (
             s.instrumentType='TYPE_FUND'
             AND (
@@ -418,8 +397,8 @@ interface BorsaDao {
             )
           )
         )
-        AND COALESCE(s.instrumentType,'TYPE_STOCK')!='TYPE_OPTION'
-      ORDER BY l.score DESC LIMIT 150
+        AND s.instrumentType!='TYPE_OPTION'
+      ORDER BY l.score DESC LIMIT 80
     """)
     suspend fun topSignalScores():List<LiveScoreEntity>
 
@@ -521,6 +500,6 @@ interface BorsaDao {
         PreQueueSnapshotEntity::class,
         LiveScoreEntity::class,PaperTradeEntity::class
     ],
-    version=10,exportSchema=false
+    version=8,exportSchema=false
 )
 abstract class AppDatabase:RoomDatabase(){ abstract fun dao():BorsaDao }

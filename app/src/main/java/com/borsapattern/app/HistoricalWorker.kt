@@ -107,13 +107,8 @@ class HistoricalWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                     effectiveType==MarketPrefs.TYPE_FUND &&
                     MarketPrefs.isLeveragedFund(it.symbol,it.name)
 
-                val provisionalStock=
-                    effectiveSegment==MarketPrefs.OTHER &&
-                    effectiveType==MarketPrefs.TYPE_STOCK &&
-                    !it.symbol.isNullOrBlank()
-
                 val segmentAllowed =
-                    if(isLeveraged || provisionalStock) true
+                    if(isLeveraged) true
                     else effectiveSegment!=MarketPrefs.OTHER &&
                         wantedSegments.contains(effectiveSegment)
 

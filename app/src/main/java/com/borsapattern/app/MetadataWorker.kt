@@ -13,14 +13,8 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     private val catalogPrefs get()=applicationContext.getSharedPreferences("catalog",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
-        val batch=inputData.getInt("batch",60).coerceIn(20,120)
+        val batch=inputData.getInt("batch",60).coerceIn(20,80)
         val round=inputData.getInt("round",0)
-
-        // One MarketWatch request can repair hundreds of names/flows at once.
-        if(round==0 || round%12==0){
-            runCatching{bulkRepairFromMarketWatch()}
-        }
-
         val symbols=dao.symbolsNeedingMetadata(batch)
         val live=dao.liveScoresNeedingName(batch)
 
@@ -58,7 +52,7 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
 
         val fixed=AtomicInteger(0)
         coroutineScope{
-            for(chunk in codes.take(batch).chunked(10)){
+            for(chunk in codes.take(batch).chunked(6)){
                 chunk.map{code->
                     async(Dispatchers.IO){
                         try{
@@ -82,7 +76,7 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
         dao.repairLiveScoreNames()
 
         val remaining=dao.symbolsNeedingMetadata(1).isNotEmpty()
-        if(!remaining || round>=39){
+        if(!remaining || round>=79){
             dao.repairLiveScoreNames()
             prefs.edit()
                 .putString(
@@ -123,48 +117,6 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
             CHAIN,ExistingWorkPolicy.APPEND_OR_REPLACE,next
         )
         return Result.success()
-    }
-
-    private suspend fun bulkRepairFromMarketWatch(){
-        val arr=api.jsonArrayFrom(api.marketWatchRaw(),"marketwatch","marketWatch")
-        if(arr.length()==0) return
-        val old=dao.allSymbols().associateBy{it.insCode}
-        val updates=mutableListOf<SymbolEntity>()
-
-        for(i in 0 until arr.length()){
-            val o=arr.optJSONObject(i)?:continue
-            val ins=firstString(o,"insCode","instrumentId")?:continue
-            val current=old[ins] ?: continue
-
-            val rawSymbol=firstString(o,"lVal18AFC","symbol","instrumentName")
-            val symbol=cleanSymbol(rawSymbol,ins)
-                ?.takeIf{it.isNotBlank() && it!=ins}
-                ?: current.symbol
-            val name=firstString(o,"lVal30","name","companyNamePersian")
-                ?.takeIf{it.isNotBlank()}
-                ?: current.name
-            val flow=firstInt(o,"flow") ?: current.flow
-            val board=firstString(o,"cgrValCotTitle","boardTitle")
-                ?.takeIf{it.isNotBlank()}
-                ?: current.boardTitle
-
-            val derivedSegment=MarketPrefs.classify(flow,board)
-            val segment=if(derivedSegment!=MarketPrefs.OTHER)
-                derivedSegment else current.segment
-            val type=MarketPrefs.classifyType(symbol,name,flow,board)
-
-            if(
-                symbol!=current.symbol || name!=current.name ||
-                flow!=current.flow || board!=current.boardTitle ||
-                segment!=current.segment || type!=current.instrumentType
-            ){
-                updates += current.copy(
-                    symbol=symbol,name=name,flow=flow,
-                    segment=segment,boardTitle=board,instrumentType=type
-                )
-            }
-        }
-        if(updates.isNotEmpty()) dao.upsertSymbols(updates)
     }
 
     companion object{ const val CHAIN="metadata_name_repair" }

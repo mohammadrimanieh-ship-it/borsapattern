@@ -278,53 +278,6 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             }
         }
 
-        // Lead-time is the user-facing metric: for each real persistent queue,
-        // find the earliest checkpoint at which the model had already fired.
-        val leadCursor=db.query("""
-            SELECT insCode,date,
-                   MAX(
-                     CASE
-                       WHEN detected=1 AND minutesBefore IN (30,20,15,10,5)
-                       THEN minutesBefore ELSE 0
-                     END
-                   ) AS lead
-            FROM prequeue_snapshots
-            WHERE label=1
-            GROUP BY insCode,date
-        """.trimIndent())
-        var leadTotal=0
-        var leadNever=0
-        var leadSum=0
-        val leadHits=mutableMapOf(30 to 0,20 to 0,15 to 0,10 to 0,5 to 0)
-        leadCursor.use{
-            while(it.moveToNext()){
-                val lead=it.getInt(2)
-                leadTotal++
-                if(lead<=0) leadNever++ else leadSum+=lead
-                for(k in leadHits.keys){
-                    if(lead>=k) leadHits[k]=(leadHits[k]?:0)+1
-                }
-            }
-        }
-        edit.putInt("lead_total",leadTotal)
-        edit.putInt("lead_never",leadNever)
-        edit.putFloat(
-            "lead_never_rate",
-            if(leadTotal>0) leadNever.toFloat()/leadTotal else 0f
-        )
-        edit.putFloat(
-            "lead_average_minutes",
-            if(leadTotal-leadNever>0)
-                leadSum.toFloat()/(leadTotal-leadNever).toFloat()
-            else 0f
-        )
-        for(k in listOf(30,20,15,10,5)){
-            edit.putFloat(
-                "lead_rate_$k",
-                if(leadTotal>0) (leadHits[k]?:0).toFloat()/leadTotal else 0f
-            )
-        }
-
         val n=db.query("""
             SELECT COUNT(*),
                    SUM(CASE WHEN detected=1 THEN 1 ELSE 0 END)

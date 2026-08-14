@@ -12,17 +12,100 @@ class BorsaApp:Application(){
 
     override fun onCreate(){
         super.onCreate()
-        db=Room.databaseBuilder(this,AppDatabase::class.java,"borsa.db")
+        db=Room.databaseBuilder(this,AppDatabase::class.java,"borsa_safe_v281.db")
             .addMigrations(
                 MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4,
-                MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10
+                MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8
             )
             .build()
         Notifications.createChannel(this)
 
-        // v2.9.3 rescue: no WorkManager jobs are started from Application.onCreate.
-        // This guarantees that UI startup is not blocked by a worker opening/migrating Room.
-        // User-triggered jobs and the foreground live monitor still work after the Activity opens.
+        val appPrefs=getSharedPreferences("app_state",MODE_PRIVATE)
+        if(!appPrefs.getBoolean("v18_worker_reset_done",false)){
+            val wm=WorkManager.getInstance(this)
+            wm.cancelUniqueWork(HistoricalWorker.HISTORY_CHAIN)
+            wm.cancelUniqueWork("daily_incremental_sync_kickoff")
+            wm.cancelUniqueWork("historical_queue_analysis")
+            getSharedPreferences("sync",MODE_PRIVATE).edit()
+                .putBoolean("sync_running",false)
+                .putInt("sync_done",0)
+                .putInt("sync_total",0)
+                .putString("sync_status","آماده؛ برای استخراج انتخاب‌ها را تایید کنید")
+                .apply()
+
+            // One-time repair only for genuinely missing symbol names.
+            val nameRepair=OneTimeWorkRequestBuilder<MetadataWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInputData(workDataOf("batch" to 30))
+                .build()
+            wm.enqueueUniqueWork(
+                MetadataWorker.CHAIN,
+                ExistingWorkPolicy.KEEP,
+                nameRepair
+            )
+
+            appPrefs.edit().putBoolean("v18_worker_reset_done",true).apply()
+        }
+
+        val catalogPrefs=getSharedPreferences("catalog",MODE_PRIVATE)
+        val now=System.currentTimeMillis()
+        val lastCatalog=catalogPrefs.getLong("last_refresh",0L)
+        val appState=getSharedPreferences("app_state",MODE_PRIVATE)
+        val forceV24=!appState.getBoolean("v24_symbol_update_done",false)
+
+        if(forceV24 || now-lastCatalog > 12L*60L*60L*1000L){
+            if(forceV24){
+                catalogPrefs.edit()
+                    .remove("eligible_count")
+                    .remove("raw_count")
+                    .remove("bourse_count")
+                    .remove("farabourse_count")
+                    .remove("base_count")
+                    .remove("leveraged_count")
+                    .remove("unknown_count")
+                    .remove("excluded_count")
+                    .putString("status","در حال بازسازی کامل فهرست نمادها")
+                    .apply()
+            }
+
+            val catalogReq=OneTimeWorkRequestBuilder<SymbolCatalogWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .build()
+            WorkManager.getInstance(this).enqueueUniqueWork(
+                SymbolCatalogWorker.CHAIN,
+                if(forceV24) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                catalogReq
+            )
+            if(forceV24){
+                appState.edit().putBoolean("v24_symbol_update_done",true).apply()
+            }
+        }
+
+        if(catalogPrefs.getInt("unknown_count",0)>0){
+            val resumeMetadata=OneTimeWorkRequestBuilder<MetadataWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .setInputData(workDataOf("batch" to 60))
+                .build()
+            WorkManager.getInstance(this).enqueueUniqueWork(
+                MetadataWorker.CHAIN,
+                ExistingWorkPolicy.KEEP,
+                resumeMetadata
+            )
+        }
+
+        val pipelineState=getSharedPreferences("analysis_pipeline",MODE_PRIVATE)
+        if(pipelineState.getBoolean("enabled",false)){
+            val repair=OneTimeWorkRequestBuilder<PipelineCoordinatorWorker>()
+                .setConstraints(HistoricalWorker.networkConstraint())
+                .build()
+            WorkManager.getInstance(this).enqueueUniqueWork(
+                PipelineCoordinatorWorker.CHAIN,
+                ExistingWorkPolicy.KEEP,
+                repair
+            )
+        }
+
+        scheduleBackgroundWork()
     }
 
     private fun scheduleBackgroundWork(){
@@ -135,64 +218,6 @@ class BorsaApp:Application(){
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN queueEndHeld INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN queueValueRetention REAL NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE queue_events ADD COLUMN nextDayReturnPct REAL")
-            }
-        }
-        val MIGRATION_8_9=object:Migration(8,9){
-            override fun migrate(db:SupportSQLiteDatabase){
-                db.execSQL("ALTER TABLE live_scores ADD COLUMN firstAlertAt INTEGER")
-                db.execSQL("ALTER TABLE live_scores ADD COLUMN alertLevel TEXT NOT NULL DEFAULT 'WATCH'")
-                db.execSQL("ALTER TABLE live_scores ADD COLUMN sessionDate INTEGER NOT NULL DEFAULT 0")
-                db.execSQL("ALTER TABLE live_scores ADD COLUMN queueDetectedAt INTEGER")
-                db.execSQL("ALTER TABLE live_scores ADD COLUMN leadSeconds INTEGER")
-            }
-        }
-
-        val MIGRATION_9_10=object:Migration(9,10){
-            override fun migrate(db:SupportSQLiteDatabase){
-                // Rebuild only the lightweight live table. Historical data,
-                // queue_events, daily and prequeue_snapshots are preserved.
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS live_scores_new (
-                        insCode TEXT NOT NULL,
-                        symbol TEXT,
-                        score REAL NOT NULL,
-                        reason TEXT NOT NULL,
-                        updatedAt INTEGER NOT NULL,
-                        patternScore REAL NOT NULL,
-                        technicalScore REAL NOT NULL,
-                        volumeScore REAL NOT NULL,
-                        rsi REAL,
-                        macd REAL,
-                        actorScore REAL NOT NULL,
-                        lastPrice REAL NOT NULL,
-                        firstAlertAt INTEGER,
-                        alertLevel TEXT NOT NULL DEFAULT 'WATCH',
-                        sessionDate INTEGER NOT NULL DEFAULT 0,
-                        queueDetectedAt INTEGER,
-                        leadSeconds INTEGER,
-                        PRIMARY KEY(insCode)
-                    )
-                """.trimIndent())
-
-                db.execSQL("""
-                    INSERT OR REPLACE INTO live_scores_new(
-                        insCode,symbol,score,reason,updatedAt,
-                        patternScore,technicalScore,volumeScore,rsi,macd,
-                        actorScore,lastPrice,firstAlertAt,alertLevel,sessionDate,
-                        queueDetectedAt,leadSeconds
-                    )
-                    SELECT
-                        insCode,symbol,score,reason,updatedAt,
-                        COALESCE(patternScore,0),COALESCE(technicalScore,0),
-                        COALESCE(volumeScore,0),rsi,macd,
-                        COALESCE(actorScore,0),COALESCE(lastPrice,0),
-                        firstAlertAt,COALESCE(alertLevel,'WATCH'),
-                        COALESCE(sessionDate,0),queueDetectedAt,leadSeconds
-                    FROM live_scores
-                """.trimIndent())
-
-                db.execSQL("DROP TABLE live_scores")
-                db.execSQL("ALTER TABLE live_scores_new RENAME TO live_scores")
             }
         }
     }

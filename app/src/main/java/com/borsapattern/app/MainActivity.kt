@@ -67,8 +67,6 @@ class MainActivity:ComponentActivity(){
         val catalogPrefs=remember{getSharedPreferences("catalog",Context.MODE_PRIVATE)}
         val queueLearningPrefs=remember{getSharedPreferences("queue_learning",Context.MODE_PRIVATE)}
         val preQueuePrefs=remember{getSharedPreferences("prequeue_backtest",Context.MODE_PRIVATE)}
-        val livePrefs=remember{getSharedPreferences("live_monitor",Context.MODE_PRIVATE)}
-        val monitorPrefs=remember{getSharedPreferences(MarketMonitorService.PREFS,Context.MODE_PRIVATE)}
 
         var symbols by remember{mutableStateOf(0)}
         var records by remember{mutableStateOf(0)}
@@ -89,12 +87,9 @@ class MainActivity:ComponentActivity(){
         var selectedSignals by remember{mutableStateOf(emptyList<SymbolSignalRow>())}
         var selectedPreQueue by remember{mutableStateOf(emptyList<PreQueueSnapshotRow>())}
         var selectedStats by remember{mutableStateOf<SymbolDetailStats?>(null)}
-        var liveEnabled by remember{
-            mutableStateOf(monitorPrefs.getBoolean("background_enabled",true))
-        }
+        var liveEnabled by remember{mutableStateOf(false)}
         var lastLiveScan by remember{mutableStateOf<Long?>(null)}
         var showMarkets by remember{mutableStateOf(false)}
-        var startupError by remember{mutableStateOf<String?>(null)}
 
         var syncStatus by remember{mutableStateOf("آماده")}
         var syncDone by remember{mutableStateOf(0)}
@@ -142,111 +137,87 @@ class MainActivity:ComponentActivity(){
         var falsePositiveRate by remember{mutableStateOf(0f)}
         var precisionRate by remember{mutableStateOf(0f)}
         var preQueueSnapshots by remember{mutableStateOf(0)}
-        var lead30 by remember{mutableStateOf(0f)}
-        var lead20 by remember{mutableStateOf(0f)}
-        var lead15 by remember{mutableStateOf(0f)}
-        var lead10 by remember{mutableStateOf(0f)}
-        var lead5 by remember{mutableStateOf(0f)}
-        var leadNever by remember{mutableStateOf(0f)}
-        var leadAverage by remember{mutableStateOf(0f)}
 
         LaunchedEffect(Unit){
             while(true){
-                try{
-                    val segs=MarketPrefs.selectedSegments(this@MainActivity).toList()
-                    val types=MarketPrefs.selectedTypes(this@MainActivity).toList()
-                    symbols=app.db.dao().symbolCount()
-                    records=app.db.dao().dailyCount()
-                    val prefEligible=catalogPrefs.getInt("eligible_count",-1)
-                    eligibleCount=if(prefEligible>=0) prefEligible else app.db.dao().allSymbols().count{
-                        val effectiveType=MarketPrefs.classifyType(
-                            it.symbol,it.name,it.flow,it.boardTitle
+                val segs=MarketPrefs.selectedSegments(this@MainActivity).toList()
+                val types=MarketPrefs.selectedTypes(this@MainActivity).toList()
+                symbols=app.db.dao().symbolCount()
+                records=app.db.dao().dailyCount()
+                val prefEligible=catalogPrefs.getInt("eligible_count",-1)
+                eligibleCount=if(prefEligible>=0) prefEligible else app.db.dao().allSymbols().count{
+                    val effectiveType=MarketPrefs.classifyType(
+                        it.symbol,it.name,it.flow,it.boardTitle
+                    )
+                    val derivedSegment=MarketPrefs.classify(it.flow,it.boardTitle)
+                    val effectiveSegment=if(derivedSegment==MarketPrefs.OTHER) it.segment else derivedSegment
+                    val stockLike=
+                        effectiveType==MarketPrefs.TYPE_STOCK ||
+                        effectiveType==MarketPrefs.TYPE_BASE ||
+                        (
+                            effectiveType==MarketPrefs.TYPE_FUND &&
+                            MarketPrefs.isLeveragedFund(it.symbol,it.name)
                         )
-                        val derivedSegment=MarketPrefs.classify(it.flow,it.boardTitle)
-                        val effectiveSegment=if(derivedSegment==MarketPrefs.OTHER) it.segment else derivedSegment
-                        val stockLike=
-                            effectiveType==MarketPrefs.TYPE_STOCK ||
-                            effectiveType==MarketPrefs.TYPE_BASE ||
-                            (
-                                effectiveType==MarketPrefs.TYPE_FUND &&
-                                MarketPrefs.isLeveragedFund(it.symbol,it.name)
-                            )
-                        stockLike && (
-                            effectiveSegment==MarketPrefs.OTHER ||
-                            MarketPrefs.selectedSegments(this@MainActivity).contains(effectiveSegment)
-                        )
-                    }
-                    candidates=app.db.dao().candidateCount()
-                    confirmed=app.db.dao().confirmedCount()
-                    rejected=app.db.dao().rejectedCount()
-                    errors=app.db.dao().errorCount()
-                    latest=app.db.dao().latestMarketDate()
-                    scores=app.db.dao().topSignalScores()
-                    history=app.db.dao().confirmedHistoryFor(segs,types,5000)
-                    trades=app.db.dao().recentPaperTrades(100)
-                    specialReopenCount=app.db.dao().specialReopenCount()
-                    preopenDay1Excluded=app.db.dao().preopenDay1ExcludedCount()
-                    twoDayQueueCount=app.db.dao().twoDayQueueCount()
-                    positiveContinuationCount=app.db.dao().positiveContinuationCount()
-                    strongPreopenNextDay=app.db.dao().strongPreopenNextDayCount()
-                    fragileQueueCount=app.db.dao().fragileQueueCount()
-                    avgPersistence=app.db.dao().averagePersistenceRatio() ?: 0.0
-                    avgQueueDuration=app.db.dao().averageQueueDuration() ?: 0.0
-
-                    learnedKnown=queueLearningPrefs.getInt("total_known",0)
-                    learnedSuccess=queueLearningPrefs.getInt("success_count",0)
-                    learnedRate=queueLearningPrefs.getFloat("success_rate",0f)
-                    learnedBestBucket=queueLearningPrefs.getString("best_bucket","داده کافی نیست")?:"داده کافی نیست"
-                    learnedBestBucketRate=queueLearningPrefs.getFloat("best_bucket_rate",0f)
-                    learnedMedianTime=queueLearningPrefs.getInt("median_success_time",0)
-                    learnedMedianQueueValue=queueLearningPrefs.getLong("median_success_queue_value",0L)
-                    learnedAvgScore=queueLearningPrefs.getFloat("avg_success_score",0f)
-
-                    preQueueStatus=preQueuePrefs.getString("status","آماده")?:"آماده"
-                    detect30=preQueuePrefs.getFloat("rate_30",0f)
-                    detect20=preQueuePrefs.getFloat("rate_20",0f)
-                    detect15=preQueuePrefs.getFloat("rate_15",0f)
-                    detect10=preQueuePrefs.getFloat("rate_10",0f)
-                    detect5=preQueuePrefs.getFloat("rate_5",0f)
-                    falsePositiveRate=preQueuePrefs.getFloat("false_positive_rate",0f)
-                    precisionRate=preQueuePrefs.getFloat("precision",0f)
-                    preQueueSnapshots=preQueuePrefs.getInt("snapshot_count",0)
-                    lead30=preQueuePrefs.getFloat("lead_rate_30",0f)
-                    lead20=preQueuePrefs.getFloat("lead_rate_20",0f)
-                    lead15=preQueuePrefs.getFloat("lead_rate_15",0f)
-                    lead10=preQueuePrefs.getFloat("lead_rate_10",0f)
-                    lead5=preQueuePrefs.getFloat("lead_rate_5",0f)
-                    leadNever=preQueuePrefs.getFloat("lead_never_rate",0f)
-                    leadAverage=preQueuePrefs.getFloat("lead_average_minutes",0f)
-
-                    liveEnabled=monitorPrefs.getBoolean("background_enabled",liveEnabled)
-                    val ls=livePrefs.getLong("last_scan",0L)
-                    lastLiveScan=ls.takeIf{it>0L}
-
-                    syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
-                    syncDone=syncPrefs.getInt("sync_done",0)
-                    syncTotal=syncPrefs.getInt("sync_total",0)
-                    analysisStatus=analysisPrefs.getString("analysis_status","آماده")?:"آماده"
-                    analysisDone=analysisPrefs.getInt("analysis_batch_done",0)
-                    analysisTotal=analysisPrefs.getInt("analysis_batch_total",0)
-                    metadataStatus=metaPrefs.getString("status","آماده")?:"آماده"
-                    nextDayStatus=nextPrefs.getString("status","آماده")?:"آماده"
-                    nextDayDone=nextPrefs.getInt("done",0)
-                    nextDayTotal=nextPrefs.getInt("total",0)
-                    walkDone=preQueuePrefs.getInt("events_done",0)
-                    walkTotal=preQueuePrefs.getInt("events_total",0)
-                    catalogStatus=catalogPrefs.getString("status","در حال آماده‌سازی فهرست نمادها")?:"در حال آماده‌سازی فهرست نمادها"
-                    catalogRaw=catalogPrefs.getInt("raw_count",0)
-                    catalogBourse=catalogPrefs.getInt("bourse_count",0)
-                    catalogFarabourse=catalogPrefs.getInt("farabourse_count",0)
-                    catalogBase=catalogPrefs.getInt("base_count",0)
-                    catalogLeveraged=catalogPrefs.getInt("leveraged_count",0)
-                    catalogUnknown=catalogPrefs.getInt("unknown_count",0)
-                    catalogExcluded=catalogPrefs.getInt("excluded_count",0)
-                    startupError=null
-                }catch(e:Throwable){
-                    startupError=e.javaClass.simpleName+": "+(e.message ?: "خطای دیتابیس")
+                    stockLike &&
+                    effectiveSegment!=MarketPrefs.OTHER &&
+                    MarketPrefs.selectedSegments(this@MainActivity).contains(effectiveSegment)
                 }
+                candidates=app.db.dao().candidateCount()
+                confirmed=app.db.dao().confirmedCount()
+                rejected=app.db.dao().rejectedCount()
+                errors=app.db.dao().errorCount()
+                latest=app.db.dao().latestMarketDate()
+                scores=app.db.dao().topSignalScores()
+                history=app.db.dao().confirmedHistoryFor(segs,types,5000)
+                trades=app.db.dao().recentPaperTrades(100)
+                specialReopenCount=app.db.dao().specialReopenCount()
+                preopenDay1Excluded=app.db.dao().preopenDay1ExcludedCount()
+                twoDayQueueCount=app.db.dao().twoDayQueueCount()
+                positiveContinuationCount=app.db.dao().positiveContinuationCount()
+                strongPreopenNextDay=app.db.dao().strongPreopenNextDayCount()
+                fragileQueueCount=app.db.dao().fragileQueueCount()
+                avgPersistence=app.db.dao().averagePersistenceRatio() ?: 0.0
+                avgQueueDuration=app.db.dao().averageQueueDuration() ?: 0.0
+
+                learnedKnown=queueLearningPrefs.getInt("total_known",0)
+                learnedSuccess=queueLearningPrefs.getInt("success_count",0)
+                learnedRate=queueLearningPrefs.getFloat("success_rate",0f)
+                learnedBestBucket=queueLearningPrefs.getString("best_bucket","داده کافی نیست")?:"داده کافی نیست"
+                learnedBestBucketRate=queueLearningPrefs.getFloat("best_bucket_rate",0f)
+                learnedMedianTime=queueLearningPrefs.getInt("median_success_time",0)
+                learnedMedianQueueValue=queueLearningPrefs.getLong("median_success_queue_value",0L)
+                learnedAvgScore=queueLearningPrefs.getFloat("avg_success_score",0f)
+
+                preQueueStatus=preQueuePrefs.getString("status","آماده")?:"آماده"
+                detect30=preQueuePrefs.getFloat("rate_30",0f)
+                detect20=preQueuePrefs.getFloat("rate_20",0f)
+                detect15=preQueuePrefs.getFloat("rate_15",0f)
+                detect10=preQueuePrefs.getFloat("rate_10",0f)
+                detect5=preQueuePrefs.getFloat("rate_5",0f)
+                falsePositiveRate=preQueuePrefs.getFloat("false_positive_rate",0f)
+                precisionRate=preQueuePrefs.getFloat("precision",0f)
+                preQueueSnapshots=preQueuePrefs.getInt("snapshot_count",0)
+
+                syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
+                syncDone=syncPrefs.getInt("sync_done",0)
+                syncTotal=syncPrefs.getInt("sync_total",0)
+                analysisStatus=analysisPrefs.getString("analysis_status","آماده")?:"آماده"
+                analysisDone=analysisPrefs.getInt("analysis_batch_done",0)
+                analysisTotal=analysisPrefs.getInt("analysis_batch_total",0)
+                metadataStatus=metaPrefs.getString("status","آماده")?:"آماده"
+                nextDayStatus=nextPrefs.getString("status","آماده")?:"آماده"
+                nextDayDone=nextPrefs.getInt("done",0)
+                nextDayTotal=nextPrefs.getInt("total",0)
+                walkDone=preQueuePrefs.getInt("events_done",0)
+                walkTotal=preQueuePrefs.getInt("events_total",0)
+                catalogStatus=catalogPrefs.getString("status","در حال آماده‌سازی فهرست نمادها")?:"در حال آماده‌سازی فهرست نمادها"
+                catalogRaw=catalogPrefs.getInt("raw_count",0)
+                catalogBourse=catalogPrefs.getInt("bourse_count",0)
+                catalogFarabourse=catalogPrefs.getInt("farabourse_count",0)
+                catalogBase=catalogPrefs.getInt("base_count",0)
+                catalogLeveraged=catalogPrefs.getInt("leveraged_count",0)
+                catalogUnknown=catalogPrefs.getInt("unknown_count",0)
+                catalogExcluded=catalogPrefs.getInt("excluded_count",0)
                 delay(1200)
             }
         }
@@ -283,12 +254,12 @@ class MainActivity:ComponentActivity(){
         }
 
         LaunchedEffect(liveEnabled){
-            if(liveEnabled){
-                if(MarketClock.isLiveWindow() || MarketClock.phase().contains("پیش")){
-                    runCatching{MarketMonitorService.start(this@MainActivity)}
-                }
-            }else{
-                runCatching{MarketMonitorService.stop(this@MainActivity)}
+            while(liveEnabled){
+                try{
+                    LiveScanEngine.scanOnce(this@MainActivity)
+                    lastLiveScan=System.currentTimeMillis()
+                }catch(_:Exception){}
+                delay(5000)
             }
         }
 
@@ -322,7 +293,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.9.3-test",
+                                    "Signal • v2.8.1-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -392,19 +363,7 @@ class MainActivity:ComponentActivity(){
                         .padding(padding)
                         .padding(horizontal=12.dp)
                 ){
-                    if(startupError!=null){
-                        Card(
-                            modifier=Modifier.fillMaxWidth().padding(top=16.dp),
-                            colors=CardDefaults.cardColors(containerColor=Color(0xFFFFF2F2)),
-                            shape=RoundedCornerShape(18.dp)
-                        ){
-                            Column(Modifier.padding(16.dp)){
-                                Text("برنامه باز شد — دیتابیس نیاز به ترمیم دارد",fontWeight=FontWeight.Black)
-                                Text(startupError ?: "",fontSize=10.sp,color=Color(0xFF9B4B4B))
-                                Text("اطلاعات تاریخی حذف نشده‌اند.",fontSize=10.sp,color=Color.Gray)
-                            }
-                        }
-                    }else when(section){
+                    when(section){
                         0 -> DailySignals(scores,liveEnabled,{liveEnabled=it},lastLiveScan)
                         1 -> DailyBacktest(
                             history=history,
@@ -432,10 +391,7 @@ class MainActivity:ComponentActivity(){
                             detect5=detect5,
                             falsePositiveRate=falsePositiveRate,
                             precisionRate=precisionRate,
-                            preQueueSnapshots=preQueueSnapshots,
-                            lead30=lead30,lead20=lead20,lead15=lead15,
-                            lead10=lead10,lead5=lead5,
-                            leadNever=leadNever,leadAverage=leadAverage
+                            preQueueSnapshots=preQueueSnapshots
                         )
                         2 -> SymbolSearchPage(
                             searchText,{searchText=it},searchResults,
@@ -573,7 +529,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.9.3-test",
+                        "v2.8.1-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -646,41 +602,22 @@ class MainActivity:ComponentActivity(){
         lastLiveScan:Long?
     ){
         var filter by remember{mutableIntStateOf(0)}
-        var tick by remember{mutableLongStateOf(System.currentTimeMillis())}
+        var nowTick by remember{mutableLongStateOf(System.currentTimeMillis())}
         LaunchedEffect(Unit){
             while(true){
-                tick=System.currentTimeMillis()
+                nowTick=System.currentTimeMillis()
                 delay(1000)
             }
         }
-
-        val currentClock=remember(tick){MarketClock.clockText()}
-        val currentDate=remember(tick){MarketClock.currentJalaliDate()}
-        val currentDay=remember(tick){MarketClock.dayLabel()}
-        val today=MarketClock.todayGregorianInt()
-        val livePrefs=remember{
-            getSharedPreferences("live_monitor",Context.MODE_PRIVATE)
-        }
-        val phase=if(MarketClock.isLiveWindow()){
-            livePrefs.getString("market_status",MarketClock.phase()) ?: MarketClock.phase()
-        }else{
-            MarketClock.phase()
-        }
-
-        // Only today's active levels are shown. Old/stale scores never become
-        // today's signals.
-        val all=scores
-            .filter{it.sessionDate==today && it.alertLevel!="NONE"}
-            .sortedByDescending{it.score}
-
-        val strong=all.filter{it.alertLevel=="STRONG"}
-        val early=all.filter{it.alertLevel=="EARLY"}
-        val watch=all.filter{it.alertLevel=="WATCH"}
-
+        val currentGregorian=remember(nowTick){todayGregorianInt(nowTick)}
+        val currentJalali=remember(nowTick){Jalali.fromGregorianInt(currentGregorian)}
+        val currentClock=remember(nowTick){clock(nowTick)}
+        val currentDay=remember(nowTick){persianDayName(nowTick)}
+        val all=scores.sortedByDescending{it.score}
         val visible=when(filter){
-            1 -> strong
-            2 -> early
-            3 -> watch
+            1 -> all.filter{it.score>=80}
+            2 -> all.filter{it.score in 65.0..79.999}
+            3 -> all.filter{it.score<65}
             else -> all
         }
         val avg=if(all.isEmpty()) 0 else all.map{it.score}.average().toInt()
@@ -697,51 +634,46 @@ class MainActivity:ComponentActivity(){
                         horizontalArrangement=Arrangement.SpaceBetween,
                         verticalAlignment=Alignment.CenterVertically
                     ){
-                        Column(horizontalAlignment=Alignment.Start){
+                        Column{
                             Text(
-                                "$currentDay • $currentDate",
-                                fontSize=13.sp,
+                                "$currentDay • $currentJalali",
+                                fontSize=12.sp,
                                 fontWeight=FontWeight.Black
                             )
                             Text(
-                                phase,
-                                fontSize=11.sp,
-                                color=when{
-                                    phase.contains("بازار باز") -> Color(0xFF118658)
-                                    phase.contains("پیش") -> Color(0xFFD67A00)
-                                    else -> Color(0xFF777A86)
-                                }
+                                marketPhase(nowTick),
+                                fontSize=10.sp,
+                                color=Color(0xFF777A86)
                             )
                         }
                         Text(
                             currentClock,
-                            fontSize=24.sp,
+                            fontSize=23.sp,
                             fontWeight=FontWeight.Black,
                             color=MaterialTheme.colorScheme.primary
                         )
                     }
                 }
             }
-
             item{
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement=Arrangement.spacedBy(8.dp)
                 ){
                     SummaryTile(
-                        title="سیگنال/هشدار امروز",
+                        title="تعداد سیگنال‌ها",
                         value=fa(all.size),
                         bg=Color(0xFFE8F7F3),
                         modifier=Modifier.weight(1f)
                     )
                     SummaryTile(
                         title="میانگین امتیاز",
-                        value=if(all.isNotEmpty()) fa(avg) else "—",
+                        value=fa(avg),
                         bg=Color(0xFFEAF2FF),
                         modifier=Modifier.weight(1f)
                     )
                     SummaryTile(
-                        title="آخرین اسکن",
+                        title="آخرین بروزرسانی",
                         value=if(lastLiveScan!=null) clock(lastLiveScan) else "—",
                         bg=Color(0xFFF1E9FF),
                         modifier=Modifier.weight(1f)
@@ -756,9 +688,9 @@ class MainActivity:ComponentActivity(){
                     verticalAlignment=Alignment.CenterVertically
                 ){
                     SignalFilterChip(filter==0,{filter=0},"همه (${fa(all.size)})")
-                    SignalFilterChip(filter==1,{filter=1},"قوی (${fa(strong.size)})")
-                    SignalFilterChip(filter==2,{filter=2},"هشدار (${fa(early.size)})")
-                    SignalFilterChip(filter==3,{filter=3},"تحت نظر (${fa(watch.size)})")
+                    SignalFilterChip(filter==1,{filter=1},"قوی (${fa(all.count{it.score>=80})})")
+                    SignalFilterChip(filter==2,{filter=2},"متوسط (${fa(all.count{it.score in 65.0..79.999})})")
+                    SignalFilterChip(filter==3,{filter=3},"ضعیف (${fa(all.count{it.score<65})})")
                 }
             }
 
@@ -773,17 +705,16 @@ class MainActivity:ComponentActivity(){
                         horizontalArrangement=Arrangement.SpaceBetween,
                         verticalAlignment=Alignment.CenterVertically
                     ){
-                        Column(Modifier.weight(1f)){
+                        Column{
                             Text(
-                                "پایش تطبیقی: کل بازار سبک • کاندیدها سریع‌تر",
-                                fontSize=11.sp,color=Color(0xFF6F7280)
+                                "اسکن و سیگنال فقط در بازه 09:00 تا 12:30",
+                                fontSize=11.sp,
+                                color=Color(0xFF6F7280)
                             )
                             Text(
-                                if(liveEnabled)
-                                    "پایش پس‌زمینه فعال است؛ با خروج از برنامه ادامه می‌دهد"
-                                else
-                                    "پایش پس‌زمینه خاموش",
-                                fontSize=11.sp,fontWeight=FontWeight.Bold,
+                                if(liveEnabled) "رصد زنده فعال" else "رصد زنده خاموش",
+                                fontSize=11.sp,
+                                fontWeight=FontWeight.Bold,
                                 color=if(liveEnabled) Color(0xFF168D68) else Color(0xFF8B8D98)
                             )
                         }
@@ -792,27 +723,33 @@ class MainActivity:ComponentActivity(){
                 }
             }
 
-            if(!MarketClock.isLiveWindow() || !phase.contains("بازار باز")){
+            if(visible.isEmpty()){
                 item{
-                    PolishedEmpty(
-                        if(phase.contains("پیش"))
-                            "پیش‌گشایش است؛ سیگنال خرید زنده از ساعت ۰۹:۰۰ فعال می‌شود."
-                        else
-                            "بازار در حال حاضر باز نیست؛ سیگنال قدیمی به عنوان سیگنال امروز نمایش داده نمی‌شود."
-                    )
+                    Card(
+                        shape=RoundedCornerShape(20.dp),
+                        colors=CardDefaults.cardColors(containerColor=Color.White)
+                    ){
+                        Text(
+                            "فعلاً سیگنالی در این فیلتر وجود ندارد.",
+                            Modifier.fillMaxWidth().padding(22.dp),
+                            textAlign=TextAlign.Center,
+                            color=Color(0xFF777A87)
+                        )
+                    }
                 }
-            }else if(visible.isEmpty()){
-                item{PolishedEmpty("فعلاً هشدار معتبر زنده‌ای در این فیلتر وجود ندارد.")}
             }else{
-                items(visible){s-> SignalCard(s) }
+                items(visible){s->
+                    SignalCard(s)
+                }
             }
 
             item{
                 Text(
-                    "تحت نظر ≠ سیگنال خرید. هشدار زودهنگام و سیگنال قوی بر اساس امتیاز و رفتار زنده جدا شده‌اند.",
+                    "این اطلاعات صرفاً جهت تحلیل بوده و تایید قطعی خرید یا فروش نیست.",
                     modifier=Modifier.fillMaxWidth().padding(vertical=8.dp),
                     textAlign=TextAlign.Center,
-                    fontSize=10.sp,color=Color(0xFF8C8E98)
+                    fontSize=10.sp,
+                    color=Color(0xFF8C8E98)
                 )
             }
         }
@@ -869,18 +806,17 @@ class MainActivity:ComponentActivity(){
     @Composable
     private fun SignalCard(s:LiveScoreEntity){
         val score=s.score.toInt()
-        val level=s.alertLevel
-        val strong=level=="STRONG"
-        val early=level=="EARLY"
+        val strong=score>=80
+        val medium=score>=65
         val badge=when{
             strong -> Color(0xFFDFF5E8)
-            early -> Color(0xFFFFF0D9)
-            else -> Color(0xFFEAF2FF)
+            medium -> Color(0xFFFFF0D9)
+            else -> Color(0xFFF2E8E8)
         }
         val badgeText=when{
             strong -> Color(0xFF118658)
-            early -> Color(0xFFD67A00)
-            else -> Color(0xFF4D6B9A)
+            medium -> Color(0xFFD67A00)
+            else -> Color(0xFFA85A5A)
         }
 
         Card(
@@ -889,91 +825,60 @@ class MainActivity:ComponentActivity(){
             colors=CardDefaults.cardColors(containerColor=Color.White),
             border=BorderStroke(1.dp,Color(0xFFE4E6ED))
         ){
-            Column(
+            Row(
                 Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=13.dp),
-                verticalArrangement=Arrangement.spacedBy(7.dp)
+                verticalAlignment=Alignment.CenterVertically
             ){
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment=Alignment.CenterVertically
-                ){
-                    Column(Modifier.weight(1.2f)){
-                        Text(
-                            s.symbol?:"در حال تکمیل نام",
-                            fontSize=17.sp,fontWeight=FontWeight.Black,
-                            color=Color(0xFF1C1E29)
-                        )
-                        Text(
-                            when(level){
-                                "STRONG" -> "سیگنال قوی"
-                                "EARLY" -> "هشدار زودهنگام"
-                                else -> "تحت نظر"
-                            },
-                            fontSize=10.sp,color=badgeText,fontWeight=FontWeight.Bold
-                        )
-                    }
-
-                    Surface(shape=RoundedCornerShape(10.dp),color=badge){
-                        Text(
-                            "${fa(score)}/۱۰۰",
-                            Modifier.padding(horizontal=10.dp,vertical=6.dp),
-                            color=badgeText,fontWeight=FontWeight.Bold
-                        )
-                    }
+                Column(Modifier.weight(1.2f)){
+                    Text(
+                        s.symbol?:"در حال تکمیل نام",
+                        fontSize=17.sp,
+                        fontWeight=FontWeight.Black,
+                        color=Color(0xFF1C1E29)
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        when{
+                            strong -> "سیگنال قوی"
+                            medium -> "سیگنال متوسط"
+                            else -> "تحت نظر"
+                        },
+                        fontSize=10.sp,
+                        color=Color(0xFF777A86)
+                    )
                 }
 
-                HorizontalDivider(color=Color(0xFFF0F1F5))
-
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement=Arrangement.SpaceBetween
+                Column(
+                    Modifier.weight(.8f),
+                    horizontalAlignment=Alignment.CenterHorizontally
                 ){
-                    Column{
-                        Text("تاریخ",fontSize=9.sp,color=Color.Gray)
-                        Text(
-                            Jalali.fromGregorianInt(s.sessionDate),
-                            fontSize=11.sp,fontWeight=FontWeight.Bold
-                        )
-                    }
-                    Column(horizontalAlignment=Alignment.CenterHorizontally){
-                        Text("اولین هشدار",fontSize=9.sp,color=Color.Gray)
-                        Text(
-                            s.firstAlertAt?.let{clock(it)} ?: "—",
-                            fontSize=11.sp,fontWeight=FontWeight.Bold
-                        )
-                    }
-                    Column(horizontalAlignment=Alignment.End){
-                        Text("آخرین بروزرسانی",fontSize=9.sp,color=Color.Gray)
-                        Text(clock(s.updatedAt),fontSize=11.sp,fontWeight=FontWeight.Bold)
-                    }
-                }
-
-                if(s.queueDetectedAt!=null){
                     Surface(
-                        color=Color(0xFFE5F7EC),
-                        shape=RoundedCornerShape(12.dp)
+                        shape=RoundedCornerShape(10.dp),
+                        color=badge
                     ){
-                        Row(
-                            Modifier.fillMaxWidth().padding(9.dp),
-                            horizontalArrangement=Arrangement.SpaceBetween
-                        ){
-                            Text(
-                                "صف تشکیل شد: ${clock(s.queueDetectedAt)}",
-                                fontSize=10.sp,fontWeight=FontWeight.Bold,
-                                color=Color(0xFF118658)
-                            )
-                            Text(
-                                s.leadSeconds?.let{
-                                    val mins=it/60
-                                    val sec=it%60
-                                    "پیش‌آگاهی ${fa(mins)}:${Jalali.digits(sec.toString().padStart(2,'0'))}"
-                                } ?: "پیش‌آگاهی —",
-                                fontSize=10.sp,fontWeight=FontWeight.Black,
-                                color=Color(0xFF118658)
-                            )
-                        }
+                        Text(
+                            fa(score),
+                            Modifier.padding(horizontal=10.dp,vertical=5.dp),
+                            color=badgeText,
+                            fontWeight=FontWeight.Bold
+                        )
                     }
+                    Text("امتیاز",fontSize=9.sp,color=Color.Gray)
                 }
+
+                Column(
+                    Modifier.weight(.9f),
+                    horizontalAlignment=Alignment.CenterHorizontally
+                ){
+                    Text(clock(s.updatedAt),fontSize=13.sp,fontWeight=FontWeight.Bold)
+                    Text("زمان سیگنال",fontSize=9.sp,color=Color.Gray)
+                }
+
+                Text(
+                    if(strong)"▲" else if(medium)"●" else "•",
+                    color=if(strong) Color(0xFF159A63) else if(medium) Color(0xFFE28B14) else Color(0xFF9A9CA6),
+                    fontSize=15.sp
+                )
             }
         }
     }
@@ -1001,9 +906,7 @@ class MainActivity:ComponentActivity(){
         detect30:Float,detect20:Float,detect15:Float,detect10:Float,detect5:Float,
         falsePositiveRate:Float,
         precisionRate:Float,
-        preQueueSnapshots:Int,
-        lead30:Float,lead20:Float,lead15:Float,lead10:Float,lead5:Float,
-        leadNever:Float,leadAverage:Float
+        preQueueSnapshots:Int
     ){
         var onlyContinuation by remember{mutableStateOf(true)}
         val continuation=history.filter{
@@ -1036,41 +939,20 @@ class MainActivity:ComponentActivity(){
                         color=Color(0xFF777A86)
                     )
                     Text(
-                        "مدل فقط اطلاعات موجود تا همان لحظه را می‌بیند؛ نتیجه آینده وارد امتیاز نمی‌شود.",
+                        "این درصدها می‌گویند مدل در هر فاصله زمانی چند درصد از صف‌های واقعی را قبل از تشکیل دیده است؛ نتیجه روز بعد معیار جداگانه‌ای است.",
                         fontSize=10.sp,
                         color=Color(0xFF777A86)
-                    )
-                    Text(
-                        "سؤال اصلی: اگر برنامه آن روز روشن بود، چند دقیقه قبل از صف هشدار می‌داد؟",
-                        fontSize=11.sp,fontWeight=FontWeight.Bold,
-                        color=Color(0xFF3D4050)
                     )
                     Spacer(Modifier.height(6.dp))
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement=Arrangement.spacedBy(5.dp)
                     ){
-                        MetricPill("≥۳۰ دقیقه زودتر","${fa((lead30*100).toInt())}٪",Modifier.weight(1f))
-                        MetricPill("≥۲۰ دقیقه","${fa((lead20*100).toInt())}٪",Modifier.weight(1f))
-                        MetricPill("≥۱۵ دقیقه","${fa((lead15*100).toInt())}٪",Modifier.weight(1f))
-                        MetricPill("≥۱۰ دقیقه","${fa((lead10*100).toInt())}٪",Modifier.weight(1f))
-                        MetricPill("≥۵ دقیقه","${fa((lead5*100).toInt())}٪",Modifier.weight(1f))
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement=Arrangement.spacedBy(7.dp)
-                    ){
-                        MetricPill(
-                            "میانگین پیش‌آگاهی",
-                            "${fa(leadAverage.toInt())} دقیقه",
-                            Modifier.weight(1f)
-                        )
-                        MetricPill(
-                            "بدون هشدار قبلی",
-                            "${fa((leadNever*100).toInt())}٪",
-                            Modifier.weight(1f)
-                        )
+                        MetricPill("هشدار ۳۰دقیقه قبل","${fa((detect30*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۲۰دقیقه قبل","${fa((detect20*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۱۵دقیقه قبل","${fa((detect15*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۱۰دقیقه قبل","${fa((detect10*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۵دقیقه قبل","${fa((detect5*100).toInt())}٪",Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(6.dp))
                     Row(
@@ -1093,10 +975,6 @@ class MainActivity:ComponentActivity(){
                             Modifier.weight(1f)
                         )
                     }
-                    Text(
-                        "نرخ خام checkpointها: ۳۰=${fa((detect30*100).toInt())}٪ • ۲۰=${fa((detect20*100).toInt())}٪ • ۱۵=${fa((detect15*100).toInt())}٪ • ۱۰=${fa((detect10*100).toInt())}٪ • ۵=${fa((detect5*100).toInt())}٪",
-                        fontSize=9.sp,color=Color(0xFF8A8D98)
-                    )
                 }
             }
 
@@ -1512,7 +1390,7 @@ class MainActivity:ComponentActivity(){
                 PolishedCard{
                     Text("۲. نوع استخراج",fontSize=15.sp,fontWeight=FontWeight.Black)
                     Text(
-                        "استخراج کامل فقط برای ساخت اولیه دیتاست است. بعد از آن داده روز جاری هنگام پایش زنده به‌صورت Incremental ذخیره می‌شود و تاریخچه چندساله از اول دانلود نمی‌شود.",
+                        "سریع: یک سال برای شروع تحلیل. عمیق: تکمیل پنج‌ساله با Resume و بدون دانلود دوباره داده کامل.",
                         fontSize=10.sp,color=Color(0xFF747785)
                     )
                     Spacer(Modifier.height(8.dp))
@@ -1591,7 +1469,7 @@ class MainActivity:ComponentActivity(){
                         total=walkTotal
                     )
                     Text(
-                        "بک‌تست سنگین کامل هر روز تکرار نمی‌شود. نتایج قبلی ذخیره هستند؛ اجرای دوباره فقط مرحله ناقص یا داده جدید را تکمیل می‌کند.",
+                        "اگر یک مرحله قبلاً کامل شده باشد، اجرای دوباره تحلیل از مرحله ناقص بعدی ادامه پیدا می‌کند.",
                         fontSize=10.sp,color=Color(0xFF118658)
                     )
                 }
@@ -1959,7 +1837,7 @@ class MainActivity:ComponentActivity(){
                                 Text(
                                     when(s.status){
                                         "QUEUE_CONFIRMED" ->
-                                            "هشدار ${fmtTime(s.signalTime)} • صف پایدار ${fmtTime(s.eventTime)}"
+                                            "هشدار ${fmtTime(s.signalTime)} • صف ${fmtTime(s.eventTime)} • پیش‌آگاهی ${leadMinutesText(s.signalTime,s.eventTime)}"
                                         "FRAGILE_QUEUE" ->
                                             "صف شکننده ${fmtTime(s.eventTime)} • از سیگنال مثبت حذف شده"
                                         "PREOPEN_QUEUE" ->
@@ -2538,6 +2416,55 @@ class MainActivity:ComponentActivity(){
         WorkManager.getInstance(this).enqueueUniqueWork(
             MetadataWorker.CHAIN,ExistingWorkPolicy.REPLACE,req
         )
+    }
+
+    private fun todayGregorianInt(ms:Long):Int{
+        val sdf=SimpleDateFormat("yyyyMMdd",Locale.US)
+        return sdf.format(Date(ms)).toIntOrNull() ?: 0
+    }
+
+    private fun persianDayName(ms:Long):String{
+        val cal=Calendar.getInstance()
+        cal.timeInMillis=ms
+        return when(cal.get(Calendar.DAY_OF_WEEK)){
+            Calendar.SATURDAY -> "شنبه"
+            Calendar.SUNDAY -> "یکشنبه"
+            Calendar.MONDAY -> "دوشنبه"
+            Calendar.TUESDAY -> "سه‌شنبه"
+            Calendar.WEDNESDAY -> "چهارشنبه"
+            Calendar.THURSDAY -> "پنج‌شنبه"
+            else -> "جمعه"
+        }
+    }
+
+    private fun marketPhase(ms:Long):String{
+        val cal=Calendar.getInstance()
+        cal.timeInMillis=ms
+        val dow=cal.get(Calendar.DAY_OF_WEEK)
+        if(dow==Calendar.THURSDAY || dow==Calendar.FRIDAY) return "بازار بسته"
+        val hh=cal.get(Calendar.HOUR_OF_DAY)
+        val mm=cal.get(Calendar.MINUTE)
+        val mins=hh*60+mm
+        return when{
+            mins<8*60+45 -> "بازار بسته"
+            mins<9*60 -> "پیش‌گشایش"
+            mins<=12*60+30 -> "بازار باز"
+            else -> "بازار بسته"
+        }
+    }
+
+    private fun leadMinutesText(signal:Int?,event:Int?):String{
+        if(signal==null || event==null) return "—"
+        fun toSec(v:Int):Int{
+            val s=v.toString().padStart(6,'0')
+            val h=s.substring(0,2).toIntOrNull() ?: 0
+            val m=s.substring(2,4).toIntOrNull() ?: 0
+            val sec=s.substring(4,6).toIntOrNull() ?: 0
+            return h*3600+m*60+sec
+        }
+        val d=(toSec(event)-toSec(signal)).coerceAtLeast(0)
+        return if(d<60) "${Jalali.digits(d.toString())} ثانیه"
+        else "${Jalali.digits((d/60).toString())} دقیقه"
     }
 
     private fun fa(v:Int)=Jalali.digits(v.toString())
